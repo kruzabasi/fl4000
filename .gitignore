@@ -1,0 +1,29 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+
+# Data files (if large or sensitive - decide based on project policy)
+# data/raw/
+# data/processed/
+
+# Output / Logs
+*.log
+results/
+output/
+
+# Secrets
+.env
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
