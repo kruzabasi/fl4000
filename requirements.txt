@@ -18,6 +18,8 @@ cryptography==44.0.2
     # via flwr
 cycler==0.12.1
     # via matplotlib
+exceptiongroup==1.2.2
+    # via pytest
 filelock==3.18.0
     # via torch
 flwr==1.17.0
@@ -32,6 +34,8 @@ idna==3.10
     # via requests
 importlib-resources==6.5.2
     # via matplotlib
+iniconfig==2.1.0
+    # via pytest
 iterators==0.0.2
     # via flwr
 jinja2==3.1.6
@@ -59,16 +63,29 @@ numpy==2.0.2
     #   flwr
     #   matplotlib
     #   pandas
+    #   patsy
     #   scikit-learn
     #   scipy
+    #   statsmodels
+    #   ta
 packaging==24.2
-    # via matplotlib
+    # via
+    #   matplotlib
+    #   pytest
+    #   statsmodels
 pandas==2.2.3
-    # via -r requirements.in
+    # via
+    #   -r requirements.in
+    #   statsmodels
+    #   ta
 pathspec==0.12.1
     # via flwr
+patsy==1.0.1
+    # via statsmodels
 pillow==11.1.0
     # via matplotlib
+pluggy==1.5.0
+    # via pytest
 protobuf==4.25.6
     # via flwr
 pycparser==2.22
@@ -79,6 +96,8 @@ pygments==2.19.1
     # via rich
 pyparsing==3.2.3
     # via matplotlib
+pytest==8.3.5
+    # via -r requirements.in
 python-dateutil==2.9.0.post0
     # via
     #   matplotlib
@@ -100,17 +119,25 @@ rich==13.9.4
 scikit-learn==1.6.1
     # via -r requirements.in
 scipy==1.13.1
-    # via scikit-learn
+    # via
+    #   scikit-learn
+    #   statsmodels
 shellingham==1.5.4
     # via typer
 six==1.17.0
     # via python-dateutil
+statsmodels==0.14.4
+    # via -r requirements.in
 sympy==1.13.1
     # via torch
+ta==0.11.0
+    # via -r requirements.in
 threadpoolctl==3.6.0
     # via scikit-learn
 tomli==2.2.1
-    # via flwr
+    # via
+    #   flwr
+    #   pytest
 tomli-w==1.2.0
     # via flwr
 torch==2.6.0

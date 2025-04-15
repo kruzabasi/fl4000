@@ -6,3 +6,6 @@ scikit-learn
 matplotlib
 torch
 flwr
+ta
+pytest
+statsmodels
