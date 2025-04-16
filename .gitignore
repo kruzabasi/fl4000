@@ -11,11 +11,12 @@ __pycache__/
 # IDE files
 .vscode/
 .idea/
+.lsp/
+.clj-kondo/
 *.swp
 
 # Data files (if large or sensitive - decide based on project policy)
-# data/raw/
-# data/processed/
+data/
 
 # Output / Logs
 *.log
