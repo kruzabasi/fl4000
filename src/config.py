@@ -19,6 +19,8 @@ SLEEP_DURATION = 12
 
 # Data storage path
 DATA_DIR = os.path.join("data", "raw")
+PROCESSED_DIR = os.path.join("data", "processed")
+NORMALIZED_DIR = os.path.join("data", "normalized")
 
 # Ensure the data directory exists
 os.makedirs(DATA_DIR, exist_ok=True)
