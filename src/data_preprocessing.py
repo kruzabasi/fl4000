@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+import glob
 import logging
 from config import DATA_DIR
 from typing import List, Optional
@@ -15,76 +16,49 @@ logging.basicConfig(
 def load_raw_data(raw_dir: str = DATA_DIR, symbols: Optional[List[str]] = None) -> pd.DataFrame:
     """
     Loads individual raw stock data CSVs from a directory and combines them
-    into a single DataFrame.
-
+    into a single DataFrame. Skips files that are malformed or missing required columns.
     Args:
         raw_dir (str): The directory containing the raw CSV files.
         symbols (Optional[List[str]]): A list of specific symbols to load.
-                                         If None, attempts to load all .csv files.
-
+                                       If None, attempts to load all .csv files.
     Returns:
         pd.DataFrame: A combined DataFrame with data for all loaded symbols,
                       indexed by timestamp and sorted.
-
     Raises:
-        ValueError: If no data is loaded.
+        ValueError: If no valid data files are found.
     """
-    logging.info(f"Loading raw data from: {raw_dir}")
-    all_dfs = []
-    if symbols is None:
+
+    all_files = glob.glob(os.path.join(raw_dir, '*.csv'))
+    if symbols is not None:
+        all_files = [f for f in all_files if os.path.splitext(os.path.basename(f))[0] in symbols]
+
+    dfs = []
+    required_cols = {'timestamp', 'open', 'high', 'low', 'close', 'volume'}
+    for file in all_files:
         try:
-            symbols = [f.split('.')[0] for f in os.listdir(raw_dir) if f.endswith('.csv')]
-            logging.info(f"No specific symbols provided, found {len(symbols)} CSV files.")
-        except FileNotFoundError:
-             logging.error(f"Raw data directory not found: {raw_dir}")
-             raise
-    else:
-         logging.info(f"Loading specific symbols: {symbols}")
+            df = pd.read_csv(file)
+            if not required_cols.issubset(df.columns):
+                logging.warning(f"Skipping {file}: missing required columns {required_cols - set(df.columns)}.")
+                continue
+            # Add symbol column if not present
+            if 'symbol' not in df.columns:
+                symbol = os.path.splitext(os.path.basename(file))[0]
+                df['symbol'] = symbol
+            dfs.append(df)
+        except Exception as e:
+            logging.warning(f"Skipping {file}: {e}")
+            continue
 
+    if not dfs:
+        logging.error("No valid data files loaded. Returning empty DataFrame.")
+        return pd.DataFrame()
 
-    for symbol in symbols:
-        # Assuming filenames match symbols (e.g., AZN.LON.csv or just AZN.csv)
-        # Try both formats if needed
-        potential_filenames = [f"{symbol}.csv", f"{symbol.split('.')[0]}.csv"]
-        file_path = None
-        for fname in potential_filenames:
-            p = os.path.join(raw_dir, fname)
-            if os.path.exists(p):
-                file_path = p
-                break
-
-        if file_path and os.path.exists(file_path):
-            try:
-                df = pd.read_csv(file_path, index_col='timestamp', parse_dates=True)
-                # Ensure 'symbol' column exists or add it
-                if 'symbol' not in df.columns:
-                    df['symbol'] = symbol
-                all_dfs.append(df)
-                logging.debug(f"Loaded data for {symbol}")
-            except Exception as e:
-                logging.warning(f"Error loading {symbol} from {file_path}: {e}")
-        else:
-            logging.warning(f"File not found for symbol: {symbol} in {raw_dir}")
-
-    if not all_dfs:
-        raise ValueError("No data loaded. Check raw data directory and symbol list.")
-
-    combined = pd.concat(all_dfs).sort_index()
-    logging.info(f"Combined raw data shape: {combined.shape}")
-
-    # Standardize column names (lowercase, replace space with underscore)
-    combined.columns = [str(col).lower().replace(' ', '_') for col in combined.columns]
-
+    combined = pd.concat(dfs, ignore_index=True)
     # Ensure essential columns exist after standardization
-    expected_cols = ['symbol', 'open', 'high', 'low', 'close', 'adjusted_close', 'volume']
+    expected_cols = ['symbol', 'open', 'high', 'low', 'close', 'volume']
     missing_cols = [col for col in expected_cols if col not in combined.columns]
     if missing_cols:
         logging.warning(f"Combined DataFrame missing essential columns: {missing_cols}")
-
-    # Keep only necessary columns if desired (optional, uncomment if needed)
-    # cols_to_keep = [col for col in expected_cols if col in combined.columns]
-    # combined = combined[cols_to_keep]
-
     logging.info("Finished loading raw data.")
     return combined
 
@@ -120,61 +94,103 @@ def check_missing_data(df: pd.DataFrame) -> None:
 def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     Cleans the DataFrame by handling missing values using forward fill,
-    then backward fill within each symbol group.
+    then backward fill within each symbol group. Applies filling only
+    to columns other than 'symbol' and 'timestamp'.
 
     Args:
-        df (pd.DataFrame): Input DataFrame.
-
+        df (pd.DataFrame): Input DataFrame. Must contain 'symbol' and
+                           'timestamp' columns (or a DatetimeIndex that
+                           will be converted to 'timestamp').
     Returns:
         pd.DataFrame: Cleaned DataFrame, sorted by timestamp.
     """
-    logging.info("Cleaning data (forward fill then backward fill)...")
+    logging.info("Cleaning data (forward fill then backward fill per symbol)...")
+    if df.empty:
+        logging.warning("Input DataFrame is empty. Returning empty DataFrame.")
+        return df
+
+    # --- Input Validation ---
     if 'symbol' not in df.columns:
-        logging.error("Missing 'symbol' column for cleaning. Applying fill globally.")
-        df_filled = df.ffill().bfill()
+        logging.error(f"Missing 'symbol' column. Columns present: {df.columns.tolist()}")
+        # Decide error handling: raise error or return unmodified/partially processed df?
+        # Raising an error is often better to prevent silent failures downstream.
+        raise ValueError("Input DataFrame must contain a 'symbol' column.")
+
+    # Ensure 'timestamp' exists, converting index if necessary
+    if 'timestamp' not in df.columns:
+        if isinstance(df.index, pd.DatetimeIndex):
+            logging.debug("Converting DatetimeIndex to 'timestamp' column.")
+            # Avoid modifying the original DataFrame passed to the function
+            df = df.reset_index().rename(columns={'index': 'timestamp'})
+        else:
+            raise ValueError("Input DataFrame must have a 'timestamp' column or a DatetimeIndex.")
+    # --- End Validation ---
+
+    # Make a copy to avoid modifying the original DataFrame
+    df_processed = df.copy()
+
+    # Sort by symbol and timestamp is crucial for correct ffill/bfill within groups
+    logging.debug("Sorting by symbol and timestamp.")
+    df_processed = df_processed.sort_values(by=['symbol', 'timestamp'])
+
+    # Identify columns to apply filling to (exclude grouping keys)
+    cols_to_fill = df_processed.columns.difference(['symbol', 'timestamp'])
+
+    if cols_to_fill.empty:
+        logging.warning("No columns found to fill (excluding 'symbol', 'timestamp').")
     else:
-        # Ensure data is sorted by symbol then time for correct filling
-        df_sorted = df.sort_values(by=['symbol', df.index.name])
-        logging.debug("Applying forward fill per symbol...")
-        df_filled = df_sorted.groupby('symbol', group_keys=False).ffill()
-        logging.debug("Applying backward fill per symbol...")
-        df_filled = df_filled.groupby('symbol', group_keys=False).bfill()
+        logging.info(f"Applying forward fill then backward fill to columns: {cols_to_fill.tolist()}")
 
-    if df_filled.isnull().values.any():
-        initial_rows = df.shape[0]
-        df_filled = df_filled.dropna()
-        final_rows = df.shape[0]
-        logging.warning(f"NaNs remained after ffill/bfill. Dropped {initial_rows - final_rows} rows.")
-    else:
-        logging.info("NaN filling complete, no remaining NaNs found.")
+        # Apply the filling function to each group
+        df_processed = (
+            df_processed.groupby('symbol', group_keys=False)[cols_to_fill]
+            .apply(lambda g: g.ffill().bfill())
+        )
+        # Re-attach the grouping columns and timestamp
+        df_processed = df_processed.join(df[['symbol', 'timestamp']])
 
-    # Resort by date index after cleaning
-    return df_filled.sort_index()
+        # --- Check for remaining NaNs ---
+        # This check should focus on the columns that were *supposed* to be filled
+        if df_processed[cols_to_fill].isnull().values.any():
+            initial_rows = len(df_processed)
+            # Drop rows where *any* of the filled columns still have NaN
+            # This happens if an entire group had NaNs at the start/end for a column
+            df_processed = df_processed.dropna(subset=cols_to_fill)
+            final_rows = len(df_processed)
+            rows_dropped = initial_rows - final_rows
+            if rows_dropped > 0:
+                 logging.warning(f"NaNs remained in columns {cols_to_fill.tolist()} after ffill/bfill. Dropped {rows_dropped} rows.")
+        else:
+            logging.info("NaN filling complete, no remaining NaNs found in processed columns.")
 
-def calculate_log_returns(df: pd.DataFrame, price_col: str = 'adjusted_close') -> pd.DataFrame:
+    logging.debug("Sorting final DataFrame by timestamp.")
+    df_final = df_processed.sort_values(by='timestamp')
+
+    return df_final
+
+def calculate_log_returns(df: pd.DataFrame, price_col: str = 'close') -> pd.DataFrame:
     """
     Calculates the logarithmic returns for the specified price column,
     grouped by symbol. Drops rows where return cannot be calculated (first row per symbol).
-
     Args:
         df (pd.DataFrame): Input DataFrame, must contain 'symbol' column and price_col.
         price_col (str): The name of the column containing the prices to use.
-
     Returns:
         pd.DataFrame: DataFrame with added 'log_return' column.
     """
     logging.info(f"Calculating log returns based on column: {price_col}")
     if price_col not in df.columns:
-         raise ValueError(f"Price column '{price_col}' not found in DataFrame.")
+        raise ValueError(f"Price column '{price_col}' not found in DataFrame.")
     if 'symbol' not in df.columns:
         logging.error("Missing 'symbol' column for grouping. Calculating returns globally.")
         df['log_return'] = np.log(df[price_col] / df[price_col].shift(1))
     else:
-        df = df.sort_values(by=['symbol', df.index.name]) # Ensure correct order
+        if 'timestamp' not in df.columns and isinstance(df.index, pd.DatetimeIndex):
+            df = df.reset_index().rename(columns={'index': 'timestamp'})
+        df = df.sort_values(by=['symbol', 'timestamp'])
         df['log_return'] = df.groupby('symbol')[price_col].transform(
             lambda x: np.log(x / x.shift(1))
         )
-
     initial_rows = df.shape[0]
     df = df.dropna(subset=['log_return']) # Drop rows with NaN returns
     rows_dropped = initial_rows - df.shape[0]
