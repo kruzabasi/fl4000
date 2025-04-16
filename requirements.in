@@ -8,4 +8,6 @@ torch
 flwr
 ta
 pytest
+pytest-mock
 statsmodels
+pyarrow

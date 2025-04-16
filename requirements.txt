@@ -88,6 +88,8 @@ pluggy==1.5.0
     # via pytest
 protobuf==4.25.6
     # via flwr
+pyarrow==19.0.1
+    # via -r requirements.in
 pycparser==2.22
     # via cffi
 pycryptodome==3.22.0
@@ -97,6 +99,10 @@ pygments==2.19.1
 pyparsing==3.2.3
     # via matplotlib
 pytest==8.3.5
+    # via
+    #   -r requirements.in
+    #   pytest-mock
+pytest-mock==3.14.0
     # via -r requirements.in
 python-dateutil==2.9.0.post0
     # via
