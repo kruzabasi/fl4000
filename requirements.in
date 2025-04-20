@@ -11,3 +11,10 @@ pytest
 pytest-mock
 statsmodels
 pyarrow
+xgboost
+quantstats
+seaborn
+PyPortfolioOpt
+IPython
+ecos
+scs
