@@ -32,6 +32,15 @@ PROCESSED_DIR = os.path.join("data", "processed")
 NORMALIZED_DIR = os.path.join("data", "normalized")
 RAW_T_DATA_DIR = os.path.join("data", "raw_t")
 
+# Federated Learning Simulation Configuration
+# Update these paths as needed for your environment
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FEDERATED_DATA_DIR = os.path.join(PROJECT_ROOT, "data", "federated")  # Absolute path
+NUM_CLIENTS = 40  # Update to match your number of clients
+RANDOM_SEED = 42
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "data", "results")  # Absolute path
+LEARNING_RATE = 0.0001  # eta (further reduced for stability)
+
 # Ensure the data directories exist
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(RAW_T_DATA_DIR, exist_ok=True)
