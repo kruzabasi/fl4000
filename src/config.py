@@ -1,4 +1,5 @@
 import os
+from gcis import get_gcis
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -11,6 +12,14 @@ FUNCTION = "TIME_SERIES_DAILY"
 OUTPUT_SIZE = "full" # Get all available data
 DATATYPE = "csv" # for easier parsing with pandas
 
+#  Tiingo API configuration
+TIINGO_API_KEY = os.getenv("TIINGO_API_KEY")
+TIINGO_BASE_URL = "https://api.tiingo.com/tiingo"
+TIINGO_FUNCTION = "daily"
+TIINGO_DATATYPE = "csv"  # for easier parsing with pandas
+TIINGO_START_DATE = "2005-01-04"
+TIINGO_END_DATE = "2025-04-18"
+
 # List of FTSE 100 sample symbols
 SYMBOLS = ["SHEL.LON", "BP.LON", "HSBA.LON", "BARC.LON", "LLOY.LON", "LGEN.LON", "PRU.LON", "AV.LON", "STAN.LON", "LSEG.LON", "SDR.LON", "ADM.LON", "GSK.LON", "AZN.LON", "SN.LON", "ULVR.LON", "DGE.LON", "BATS.LON", "TSCO.LON", "IMB.LON", "RKT.LON", "RIO.LON", "AAL.LON", "ANTO.LON", "MNDI.LON", "VOD.LON", "BT-A.LON", "NG.LON", "SSE.LON", "SVT.LON", "UU.LON", "REL.LON", "BA.LON", "EXPN.LON", "AHT.LON", "SMIN.LON", "RR.LON", "ITRK.LON", "SGE.LON", "AUTO.LON", "LAND.LON", "SGRO.LON", "CPG.LON", "NXT.LON", "WTB.LON", "IHG.LON", "KGF.LON", "JD.LON"]
 
@@ -21,6 +30,11 @@ SLEEP_DURATION = 12
 DATA_DIR = os.path.join("data", "raw")
 PROCESSED_DIR = os.path.join("data", "processed")
 NORMALIZED_DIR = os.path.join("data", "normalized")
+RAW_T_DATA_DIR = os.path.join("data", "raw_t")
 
-# Ensure the data directory exists
+# Ensure the data directories exist
 os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(RAW_T_DATA_DIR, exist_ok=True)
+
+# GCIs
+GCIS = get_gcis()
