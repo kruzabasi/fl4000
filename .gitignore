@@ -30,3 +30,6 @@ logs/
 
 # Jupyter Notebook Checkpoints
 .ipynb_checkpoints/
+
+# Experiment scripts and diagnostics
+experiments/
