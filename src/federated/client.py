@@ -31,7 +31,7 @@ def get_feature_columns(df):
     return numeric_feature_cols
 
 class Client:
-    def __init__(self, client_id: str, n_features: int, n_outputs: int, data_path: str, random_seed: Optional[int] = None):
+    def __init__(self, client_id: str, n_features: int, n_outputs: int, data_path: str, random_seed: Optional[int] = None, feature_cols: Optional[List[str]] = None):
         self.client_id = client_id
         self.local_model = PortfolioPredictiveModel(n_features=n_features, n_outputs=n_outputs, model_params={'alpha': 1.0}) 
         self.data_path = data_path
@@ -40,6 +40,7 @@ class Client:
         self.symbols: List[str] = [] 
         self.num_samples: int = 0
         self.random_seed = random_seed
+        self.feature_cols = feature_cols
         if self.random_seed is not None:
             np.random.seed(self.random_seed)
         self.initial_round_params: Optional[ModelParams] = None 
@@ -49,22 +50,31 @@ class Client:
         logging.debug(f"Client {self.client_id}: Loading data from {self.data_path}...")
         try:
             df = pd.read_parquet(self.data_path)
-            df = df.sort_index() 
+            df = df.sort_index()
 
             target_col = 'target_log_return'
             df[target_col] = df.groupby('symbol')['log_return'].shift(-1)
-            df_pivot_target = df.pivot(columns='symbol', values=target_col)
+            df.dropna(subset=[target_col], inplace=True)
+            df_pivot_target = df.pivot_table(index=df.index, columns='symbol', values=target_col, aggfunc='first')
 
-            feature_cols = [col for col in df.columns if col not in ['symbol', 'log_return', target_col, 'adjusted_close', 'close', 'open', 'high', 'low', 'gics_sector']]
-            numeric_feature_cols = df[feature_cols].select_dtypes(include=np.number).columns.tolist()
+            y = df_pivot_target.dropna(axis=0, how='any')
+            if self.feature_cols is not None:
+                numeric_feature_cols = self.feature_cols
+            else:
+                numeric_feature_cols = get_feature_columns(df)
+            # Group features by index and take the first row for each timestamp
+            X_pivot = df[numeric_feature_cols].groupby(df.index).first()
+            X_final = X_pivot.loc[y.index]
+            y_final = y
+            assert X_final.shape[0] == y_final.shape[0], f"X and y row mismatch: {X_final.shape[0]} vs {y_final.shape[0]}"
+            self.X_train = X_final.reset_index(drop=True).to_numpy()
+            self.y_train = y_final.reset_index(drop=True).to_numpy()
+            self.n_features = self.X_train.shape[1]
 
-            df.dropna(subset=[target_col], inplace=True) 
-            X = df[numeric_feature_cols]
-            y = df[target_col]
-
-            common_index = X.index.intersection(y.index)
-            self.X_train = X.loc[common_index].to_numpy()
-            self.y_train = y.loc[common_index].to_numpy()
+            # Ensure y_train is 2D: (n_samples, n_outputs)
+            if self.y_train.ndim == 1:
+                self.y_train = self.y_train.reshape(-1, 1)
+            self.n_outputs = self.y_train.shape[1]
 
             self.num_samples = len(self.X_train)
             logging.info(f"Client {self.client_id}: Loaded data. Train shape X: {self.X_train.shape}, y: {self.y_train.shape}")
@@ -117,17 +127,24 @@ class Client:
 
         return metrics
 
-    def set_parameters(self, parameters: ModelParams) -> None:
+    def set_parameters(self, params: List[np.ndarray]) -> None:
+        """Sets local model parameters, ensuring the model is initialized with correct shapes."""
         try:
-            self.local_model.set_parameters(parameters)
+            # Ensure model has correct number of estimators before setting parameters
+            if not hasattr(self.local_model._model, 'estimators_') or not self.local_model._model.estimators_:
+                X_dummy = np.zeros((1, self.n_features))
+                y_dummy = np.zeros((1, self.n_outputs))
+                self.local_model._model.fit(X_dummy, y_dummy)
+            self.local_model.set_parameters(params)
         except Exception as e:
             logging.error(f"Client {self.client_id}: Error setting parameters - {e}")
 
-    def get_update(self, clip_norm: Optional[float]) -> Tuple[Optional[ModelParams], int]:
-        if self.num_samples == 0 or self.initial_round_params is None:
+    def get_update(self, initial_round_params: Optional[List[np.ndarray]], clip_norm: Optional[float] = None) -> Tuple[Optional[ModelParams], int]:
+        if self.num_samples == 0 or initial_round_params is None:
             logging.warning(f"Client {self.client_id}: Cannot get update, no samples or initial params.")
             return None, 0
 
+        self.initial_round_params = copy.deepcopy(initial_round_params)
         local_params = self.local_model.get_parameters()
         raw_update = []
         try:
@@ -135,7 +152,7 @@ class Client:
                 if local.shape != initial.shape:
                     raise ValueError(f"Shape mismatch: Local {local.shape} vs Initial {initial.shape}")
                 raw_update.append(local - initial)
-        except ValueError as e:
+        except Exception as e:
             logging.error(f"Client {self.client_id}: Error calculating raw update - {e}")
             return None, 0
 
@@ -147,9 +164,9 @@ class Client:
                 logging.debug(f"Client {self.client_id}: Clipped update norm from {l2_norm:.4f}")
                 return clipped_update, self.num_samples
             else:
-                return raw_update, self.num_samples 
+                return raw_update, self.num_samples
         else:
-            return raw_update, self.num_samples 
+            return raw_update, self.num_samples
 
     def _calculate_l2_norm(self, params: List[np.ndarray]) -> float:
         squared_norms = [np.sum(np.square(p)) for p in params]

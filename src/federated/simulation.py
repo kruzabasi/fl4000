@@ -11,9 +11,9 @@ from federated.client import get_feature_columns
 # Adjust imports based on actual structure
 try:
     import config
-    from .aggregator import Aggregator
-    from .client import Client
-    from models.placeholder import PlaceholderLinearModel
+    from federated.aggregator import Aggregator
+    from federated.client import Client
+    from models.predictive_model import PortfolioPredictiveModel
 except ImportError:
     logging.error("Failed to import necessary modules. Check paths and file names.")
     exit(1)
@@ -56,13 +56,22 @@ def run_simulation():
          n_features = len(numeric_feature_cols)
          if n_features == 0:
               raise ValueError("No numeric features found in client data.")
-         logging.info(f"Determined number of features: {n_features}")
+         # Determine number of outputs (assets)
+         target_col = 'target_log_return'
+         temp_df[target_col] = temp_df.groupby('symbol')['log_return'].shift(-1)
+         df_pivot_target = temp_df.pivot_table(columns='symbol', values=target_col, aggfunc='first')
+         n_outputs = df_pivot_target.shape[1]
+         logging.info(f"Determined number of features: {n_features}, number of outputs: {n_outputs}")
     except Exception as e:
         logging.error(f"Could not load sample client data to determine feature size: {e}")
         return
 
     # 2. Initialize Model Template and Aggregator
-    model_template = PlaceholderLinearModel(n_features=n_features, random_state=config.RANDOM_SEED)
+    model_template = PortfolioPredictiveModel(n_features=n_features, n_outputs=n_outputs)
+    # Ensure global model is initialized with correct estimators
+    X_dummy = np.zeros((1, n_features))
+    y_dummy = np.zeros((1, n_outputs))
+    model_template._model.fit(X_dummy, y_dummy)
     # Assuming client IDs are 'client_0', 'client_1', ... 'client_39'
     all_client_ids = [f"client_{i}" for i in range(config.NUM_CLIENTS)]
     aggregator = Aggregator(model_template, num_clients=config.NUM_CLIENTS, client_ids=all_client_ids)
@@ -73,7 +82,7 @@ def run_simulation():
         client_id = all_client_ids[i]
         data_path = os.path.join(config.FEDERATED_DATA_DIR, client_id, "client_data.parquet")
         if os.path.exists(data_path):
-            client = Client(client_id, model_template, data_path, random_seed=config.RANDOM_SEED + i)
+            client = Client(client_id, n_features, n_outputs, data_path, random_seed=config.RANDOM_SEED + i, feature_cols=numeric_feature_cols)
             # Only add client if they successfully loaded data
             if client.num_samples > 0:
                  clients.append(client)
@@ -124,11 +133,9 @@ def run_simulation():
                 noise_multiplier = 2.0
                 DP_PARAMS['noise_multiplier'] = noise_multiplier
             except Exception as e:
-                import logging
                 logging.error(f"Could not determine noise multiplier using dp-accounting: {e}. DP disabled.")
                 DP_PARAMS = None
         else:
-            import logging
             logging.warning("Client sampling probability is zero. DP noise calculation skipped.")
             DP_PARAMS = None
 
@@ -202,21 +209,27 @@ def run_simulation():
             if sampling_probability_this_round > 0:
                 try:
                     event = dp_event.GaussianDpEvent(DP_PARAMS['noise_multiplier'])
-                    event = dp_event.SampledDpEvent(sampling_probability_this_round, event)
+                    event = dp_event.PoissonSampledDpEvent(sampling_probability_this_round, event)
                     accountant.compose(event, count=1)
-                    spent_epsilon, spent_delta = accountant.get_epsilon_and_delta(DP_PARAMS['target_delta'])
-                    import logging
+                    # Use get_epsilon if get_epsilon_and_delta is not available
+                    try:
+                        spent_epsilon, spent_delta = accountant.get_epsilon_and_delta(DP_PARAMS['target_delta'])
+                    except AttributeError:
+                        spent_epsilon = accountant.get_epsilon(DP_PARAMS['target_delta'])
+                        spent_delta = DP_PARAMS['target_delta']
                     logging.info(f"Privacy Check - Round {t+1}: Spent Epsilon={spent_epsilon:.4f} (Delta={spent_delta:.1E})")
                 except Exception as acc_e:
-                    import logging
                     logging.error(f"Error during privacy accounting: {acc_e}")
 
     logging.info("--- Simulation Finished ---")
 
     # Log final privacy spend
     if ACCOUNTING_LIB_AVAILABLE and accountant and DP_PARAMS:
-        final_epsilon, final_delta = accountant.get_epsilon_and_delta(DP_PARAMS['target_delta'])
-        import logging
+        try:
+            final_epsilon, final_delta = accountant.get_epsilon_and_delta(DP_PARAMS['target_delta'])
+        except AttributeError:
+            final_epsilon = accountant.get_epsilon(DP_PARAMS['target_delta'])
+            final_delta = DP_PARAMS['target_delta']
         logging.info(f"--- Final Privacy Spend ({config.NUM_ROUNDS} rounds) ---")
         logging.info(f"Epsilon: {final_epsilon:.4f}")
         logging.info(f"Delta:   {final_delta:.1E}")

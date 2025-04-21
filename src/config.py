@@ -41,6 +41,8 @@ RANDOM_SEED = 42
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "data", "results")  # Absolute path
 LEARNING_RATE = 0.0001  # eta (further reduced for stability)
 C_CLIP = 5.0  # L2 norm clipping threshold for client updates (tune as needed)
+NUM_ROUNDS = 20  # Number of FL rounds (adjust as needed)
+CLIENTS_PER_ROUND = 5  # Number of clients per round (adjust as needed)
 
 # Ensure the data directories exist
 os.makedirs(DATA_DIR, exist_ok=True)

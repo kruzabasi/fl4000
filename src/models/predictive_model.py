@@ -65,12 +65,15 @@ class PortfolioPredictiveModel:
             # This is a workaround for sklearn's MultiOutputRegressor structure
             logging.warning("Model not fitted yet. Fitting with dummy data to initialize estimators before setting parameters.")
             dummy_X = np.zeros((1, self.n_features))
-            dummy_y = np.zeros((1, self.n_outputs))
+            dummy_y = np.zeros((1, self.n_outputs))  # Always 2D
             try:
                 self._model.fit(dummy_X, dummy_y)
             except Exception as e:
                 logging.error(f"Dummy fit failed: {e}")
                 raise
+            # Assert correct number of estimators
+            assert len(self._model.estimators_) == self.n_outputs, (
+                f"After dummy fit, expected {self.n_outputs} estimators, got {len(self._model.estimators_)}")
 
         # Set parameters for each internal estimator
         for i, estimator in enumerate(self._model.estimators_):
