@@ -31,6 +31,16 @@ This framework implements a simulation of Federated Learning (FL) using the FedP
 - The proximal term logic is implemented in `Client.train()`. For each local batch, the gradient of the proximal term (`mu * (w - w^t)`) is added to the standard gradient.
 - Since scikit-learn's SGDRegressor does not natively support FedProx, the update is performed manually by extracting parameters, computing the combined gradient, and updating the model weights accordingly.
 
+## Differential Privacy Configuration
+
+- **C_CLIP**: L2 norm bound for client updates (clipping threshold).
+- **target_epsilon**: Target total privacy budget (ε) for training.
+- **target_delta**: Target δ (probability of privacy breach).
+- **total_rounds**: Number of federated learning rounds.
+- **noise_multiplier**: Ratio σ/C_CLIP, determined using the privacy accountant (dp-accounting library) to achieve the desired (ε, δ).
+
+These parameters are set in `config.py` and used throughout the simulation and aggregation pipeline. See `docs/privacy.md` for a full explanation of the privacy mechanism and references.
+
 ## Configuration
 Key simulation parameters (can be set in `src/federated/simulation.py` or `config.py`):
 - `TOTAL_ROUNDS`: Number of FL rounds to run.
