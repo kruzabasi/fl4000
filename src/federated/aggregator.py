@@ -2,7 +2,7 @@ import numpy as np
 import random
 import copy
 import logging
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 
 # Placeholder type for model parameters (adjust based on actual model)
 ModelParams = List[np.ndarray]
@@ -60,51 +60,86 @@ class Aggregator:
         """
         return copy.deepcopy(self.global_model_params)
 
-    def aggregate_updates(self, client_updates: List[Tuple[ModelParams, int]]) -> None:
+    def aggregate_updates(self,
+                          client_updates: List[Tuple[ModelParams, int]],
+                          num_total_clients: int,
+                          dp_params: Optional[Dict[str, float]] = None) -> None:
         """
-        Aggregates client updates using weighted averaging (FedAvg principle).
-        Updates the global model parameters in-place.
+        Aggregates client updates (clipped), adds Gaussian noise for Central Differential Privacy (DP)
+        if dp_params provided, and updates the global model.
+
+        Differential Privacy:
+        - Sums the clipped updates from all selected clients.
+        - If dp_params contains 'clip_norm' and 'noise_multiplier', adds Gaussian noise with std = noise_multiplier * clip_norm
+          to each layer of the summed update (Central DP, gradient perturbation).
+        - Averages the (potentially noisy) sum and applies it to the global model.
+
         Args:
-            client_updates (List[Tuple[ModelParams, int]]):
-                A list of tuples, where each tuple contains (client_update_params, num_samples).
-                client_update_params = local_params - global_params_at_start_of_round
-        Returns:
-            None
+            client_updates: List of tuples: (clipped_update_params, num_samples).
+            num_total_clients (int): Total number of clients (N) for DP calculation.
+            dp_params (Optional[Dict]): DP parameters:
+                'clip_norm': Clipping norm (C_clip) used by clients.
+                'noise_multiplier': Pre-calculated noise multiplier (sigma/C_clip).
+                'target_epsilon': Target epsilon for the overall training (optional, for accounting).
+                'target_delta': Target delta for the overall training (optional, for accounting).
+                'total_rounds': Total expected training rounds (T).
         """
         if not client_updates:
             logging.warning(f"Round {self.current_round}: No client updates received for aggregation.")
             return
 
+        num_selected_clients = len(client_updates)
         total_samples = sum(num_samples for _, num_samples in client_updates)
         if total_samples == 0:
-            logging.warning(f"Round {self.current_round}: Total samples from clients is zero. Skipping aggregation.")
+            logging.warning(f"Round {self.current_round}: Total samples from selected clients is zero. Skipping aggregation.")
             return
 
-        logging.info(f"Round {self.current_round}: Aggregating updates from {len(client_updates)} clients (Total samples: {total_samples}).")
+        logging.info(f"Round {self.current_round}: Aggregating clipped updates from {num_selected_clients} clients (Total samples: {total_samples}).")
 
-        # Initialize aggregated update with zeros, matching global model structure
-        aggregated_update: ModelParams = [np.zeros_like(layer) for layer in self.global_model_params]
+        # 1. Sum Clipped Updates
+        summed_update: ModelParams = [np.zeros_like(layer) for layer in self.global_model_params]
+        for update_params, _ in client_updates:
+            for i in range(len(summed_update)):
+                if update_params[i].shape == summed_update[i].shape:
+                    summed_update[i] += update_params[i]
+                else:
+                    logging.error(f"Shape mismatch during update summation! Layer {i}. Skipping this update.")
+                    summed_update = [np.zeros_like(layer) for layer in self.global_model_params]
+                    break
+            else:
+                continue
+            break
 
-        # Perform weighted averaging
-        for update_params, num_samples in client_updates:
-            weight = num_samples / total_samples
-            for i in range(len(aggregated_update)):
-                 # Ensure shapes match before adding
-                 if update_params[i].shape == aggregated_update[i].shape:
-                      aggregated_update[i] += update_params[i] * weight
-                 else:
-                      logging.error(f"Shape mismatch during aggregation! Layer {i}: Agg={aggregated_update[i].shape}, Update={update_params[i].shape}. Skipping this update.")
-                      # Optionally break or handle error differently
-                      break # Stop processing this client's update
+        # 2. Calculate and Add Gaussian Noise (if DP enabled)
+        noise_std_dev = 0.0
+        if dp_params and all(k in dp_params for k in ['clip_norm', 'noise_multiplier']):
+            clip_norm = dp_params['clip_norm']
+            noise_multiplier = dp_params['noise_multiplier']
+            noise_std_dev = noise_multiplier * clip_norm
+            logging.info(f"Applying DP noise: C={clip_norm:.2f}, noise_multiplier={noise_multiplier:.4f}, std_dev={noise_std_dev:.4f}")
 
-        # Update the global model: w_{t+1} = w_t + aggregated_update
-        # Note: client_update = w_local - w_t
-        # Aggregated update = sum( weight * (w_local - w_t) )
-        # So, w_{t+1} = w_t + sum( weight * w_local ) - sum( weight * w_t )
-        # w_{t+1} = w_t + sum( weight * w_local ) - w_t = sum( weight * w_local ) -> This is FedAvg direct model averaging
-        # If updates are parameter diffs (w_local - w_t), then:
+        elif dp_params:
+            logging.warning("DP parameters provided but 'noise_multiplier' is missing. Cannot calculate noise. Consider using a DP library (e.g., dp-accounting) to determine multiplier.")
+            pass
+
+        # Add noise to the *summed* updates
+        noisy_sum = []
+        if noise_std_dev > 0:
+            for layer_sum in summed_update:
+                noise = np.random.normal(loc=0.0, scale=noise_std_dev, size=layer_sum.shape)
+                noisy_sum.append(layer_sum + noise)
+        else:
+            noisy_sum = summed_update
+
+        # 3. Average the (potentially noisy) sum
+        average_update = [layer_sum / num_selected_clients for layer_sum in noisy_sum]
+
+        # 4. Update Global Model: w_{t+1} = w_t + average_update
         for i in range(len(self.global_model_params)):
-             self.global_model_params[i] += aggregated_update[i]
+            if self.global_model_params[i].shape == average_update[i].shape:
+                self.global_model_params[i] += average_update[i]
+            else:
+                logging.error(f"Shape mismatch during final model update! Layer {i}. Skipping layer update.")
 
         logging.debug(f"Round {self.current_round}: Global model updated.")
         self.current_round += 1

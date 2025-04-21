@@ -242,17 +242,65 @@ class Client:
         return metrics
 
 
-    def get_update(self, global_parameters_t: ModelParams) -> Tuple[Optional[ModelParams], int]:
+    def _calculate_l2_norm(self, params: List[np.ndarray]) -> float:
+        """Calculates the total L2 norm across a list of parameter arrays."""
+        squared_norms = [np.sum(np.square(p)) for p in params]
+        return np.sqrt(np.sum(squared_norms))
+
+    def get_update(self, clip_norm: Optional[float]) -> Tuple[Optional[ModelParams], int]:
         """
-        Calculates the parameter update (local_params - global_params_t).
+        Calculates the parameter update (local_params - initial_round_params),
+        applies L2 norm clipping if clip_norm is specified, and returns the
+        potentially clipped update and the number of samples.
+
+        Differential Privacy:
+        - If clip_norm is set, the L2 norm of the update is clipped to clip_norm.
+        - This ensures that each client's contribution is bounded.
+        - The clipped update is then sent to the aggregator, where noise may be added for DP.
+
         Args:
-            global_parameters_t (ModelParams): Global model parameters at the start of the round.
+            clip_norm (Optional[float]): The L2 norm clipping threshold (C_clip). If None, no clipping is applied.
+
         Returns:
-            Tuple[Optional[ModelParams], int]: (model update, number of samples used for training).
+            Tuple containing the model update (list of numpy arrays) and
+            the number of samples used for training. Returns (None, 0) if no training occurred.
         """
         if self.num_samples == 0:
-             return None, 0
+            logging.warning(f"Client {self.client_id}: Cannot get update, no samples trained.")
+            return None, 0
 
         local_params = self.local_model.get_parameters()
-        update = [local - global_t for local, global_t in zip(local_params, global_parameters_t)]
-        return update, self.num_samples
+        global_parameters_t = getattr(self, 'initial_round_params', None)
+        if global_parameters_t is None:
+            logging.error(f"Client {self.client_id}: No initial global parameters stored. Cannot calculate update.")
+            return None, 0
+        if len(local_params) != len(global_parameters_t):
+            logging.error(f"Client {self.client_id}: Parameter list length mismatch. Cannot calculate update.")
+            return None, 0
+
+        # Calculate raw update
+        raw_update = []
+        try:
+            for local, global_t in zip(local_params, global_parameters_t):
+                if local.shape != global_t.shape:
+                    raise ValueError(f"Layer shape mismatch: Local {local.shape} vs Global {global_t.shape}")
+                raw_update.append(local - global_t)
+        except ValueError as e:
+            logging.error(f"Client {self.client_id}: Error calculating raw update - {e}")
+            return None, 0
+
+        # Apply clipping if C_clip is provided
+        if clip_norm is not None and clip_norm > 0:
+            l2_norm = self._calculate_l2_norm(raw_update)
+            if l2_norm > 0: # Avoid division by zero
+                scale = min(1.0, clip_norm / l2_norm)
+                clipped_update = [layer * scale for layer in raw_update]
+                logging.debug(f"Client {self.client_id}: Clipped update norm from {l2_norm:.4f} to {clip_norm:.4f} (Scale: {scale:.4f})")
+                return clipped_update, self.num_samples
+            else:
+                # Norm is zero, update is zero, return as is
+                logging.debug(f"Client {self.client_id}: Update norm is zero, no clipping needed.")
+                return raw_update, self.num_samples
+        else:
+            # No clipping applied
+            return raw_update, self.num_samples
