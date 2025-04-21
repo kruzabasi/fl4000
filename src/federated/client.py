@@ -9,6 +9,14 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.utils import shuffle
 from models.predictive_model import PortfolioPredictiveModel 
 
+try:
+    from portfolio_optimizer import optimize_portfolio, HAS_PYPFOpt, risk_models
+except ImportError:
+    logging.error("Could not import optimize_portfolio function.")
+    optimize_portfolio = None  # Placeholder
+    HAS_PYPFOpt = False
+    risk_models = None
+
 # Placeholder type for model parameters
 ModelParams = List[np.ndarray]
 
@@ -146,3 +154,69 @@ class Client:
     def _calculate_l2_norm(self, params: List[np.ndarray]) -> float:
         squared_norms = [np.sum(np.square(p)) for p in params]
         return np.sqrt(np.sum(squared_norms))
+
+    def run_local_optimization(self, current_features: pd.DataFrame,
+                               historical_returns: pd.DataFrame,
+                               config: Dict[str, Any]) -> Optional[Dict[str, float]]:
+        """
+        Uses the client's current local model to predict returns, calculates
+        empirical covariance, and runs the MVO solver.
+
+        Args:
+            current_features (pd.DataFrame): DataFrame of features for the current
+                                             timestamp(s) needed for prediction
+                                             (index=timestamp, columns=features).
+                                             Needs to be scaled if model expects scaled input.
+            historical_returns (pd.DataFrame): DataFrame of recent actual log returns
+                                               (index=timestamp, columns=symbols) needed
+                                               for empirical covariance calculation.
+            config (Dict[str, Any]): Configuration for optimization, e.g.,
+                                     {'risk_free_rate': 0.01, 'cov_lookback': 60}.
+
+        Returns:
+            Optional[Dict[str, float]]: Dictionary of optimal weights {symbol: weight},
+                                        or None if prediction or optimization fails.
+        """
+        if optimize_portfolio is None:
+            logging.error("optimize_portfolio function not available.")
+            return None
+
+        # 1. Predict mu (Expected Returns for T+1)
+        try:
+            if len(current_features.shape) == 1:
+                current_features = current_features.to_numpy().reshape(1, -1)
+            elif isinstance(current_features, pd.DataFrame):
+                current_features = current_features.to_numpy()
+                if len(current_features) > 1:
+                    logging.warning("Predicting based on multiple feature rows, using last row.")
+                    current_features = current_features[-1].reshape(1, -1)
+
+            predicted_returns_array = self.local_model.predict(current_features)
+            predicted_returns = predicted_returns_array[0]
+            mu = pd.Series(predicted_returns, index=self.symbols)
+        except Exception as e:
+            logging.error(f"Client {self.client_id}: Failed to predict mu - {e}")
+            return None
+
+        # 2. Calculate Sigma (Empirical Covariance)
+        cov_lookback = config.get('cov_lookback', 60)
+        if len(historical_returns) < cov_lookback:
+            logging.warning(f"Client {self.client_id}: Not enough historical data ({len(historical_returns)} days) for covariance lookback ({cov_lookback}).")
+            return None
+        try:
+            returns_subset = historical_returns.iloc[-cov_lookback:]
+            if HAS_PYPFOpt and risk_models is not None:
+                Sigma = risk_models.sample_cov(returns_subset, returns_data=True, frequency=252)
+            else:
+                Sigma = (returns_subset.cov() * 252)
+        except Exception as e:
+            logging.error(f"Client {self.client_id}: Failed to calculate Sigma - {e}")
+            return None
+
+        # 3. Call Optimizer
+        opt_config = {
+            'risk_free_rate': config.get('risk_free_rate', 0.01),
+            'weight_bounds': config.get('weight_bounds', (0, 1))
+        }
+        optimal_weights_dict = optimize_portfolio(mu, Sigma, opt_config)
+        return optimal_weights_dict
