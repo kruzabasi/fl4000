@@ -50,6 +50,18 @@ Follow these steps to set up the project environment:
 
 ## Usage
 
+To run all tests and validate the integrity of the codebase, use:
+
+```bash
+.venv/bin/python -m pytest
+```
+
+All tests should pass successfully. The test suite covers:
+- Aggregator logic (FedAvg/FedProx)
+- Simulation rounds and results output
+- Data alignment and loading
+- Integration and privacy mechanisms
+
 (Placeholder) Run the main simulation script to start a federated learning experiment:
 
 ```bash
