@@ -40,6 +40,7 @@ NUM_CLIENTS = 40  # Update to match your number of clients
 RANDOM_SEED = 42
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "data", "results")  # Absolute path
 LEARNING_RATE = 0.0001  # eta (further reduced for stability)
+C_CLIP = 5.0  # L2 norm clipping threshold for client updates (tune as needed)
 
 # Ensure the data directories exist
 os.makedirs(DATA_DIR, exist_ok=True)
