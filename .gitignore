@@ -32,4 +32,7 @@ logs/
 .ipynb_checkpoints/
 
 # Experiment scripts and diagnostics
-experiments/
+experimental/
+
+# documents
+methodology*
