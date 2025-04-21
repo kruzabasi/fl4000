@@ -11,6 +11,7 @@ __pycache__/
 
 # IDE files
 .vscode/
+vs-code.edn
 .idea/
 .lsp/
 .clj-kondo/

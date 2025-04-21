@@ -4,6 +4,8 @@
 #
 #    pip-compile requirements.in
 #
+absl-py==2.2.2
+    # via dp-accounting
 asttokens==3.0.0
     # via stack-data
 beautifulsoup4==4.13.4
@@ -28,6 +30,8 @@ cycler==0.12.1
     # via matplotlib
 decorator==5.2.1
     # via ipython
+dp-accounting==0.0.2
+    # via -r requirements.in
 ecos==2.0.14
     # via
     #   -r requirements.in
@@ -97,6 +101,7 @@ numpy==2.0.2
     #   clarabel
     #   contourpy
     #   cvxpy
+    #   dp-accounting
     #   ecos
     #   flwr
     #   matplotlib
@@ -188,7 +193,9 @@ pytz==2025.2
     #   pandas
     #   yfinance
 pyyaml==6.0.2
-    # via flwr
+    # via
+    #   -r requirements.in
+    #   flwr
 quantstats==0.0.64
     # via -r requirements.in
 requests==2.32.3
@@ -206,6 +213,7 @@ scipy==1.13.1
     # via
     #   clarabel
     #   cvxpy
+    #   dp-accounting
     #   ecos
     #   osqp
     #   pyportfolioopt
