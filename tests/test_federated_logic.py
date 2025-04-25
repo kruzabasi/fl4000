@@ -79,9 +79,9 @@ def test_aggregator_weighted_average(simple_aggregator, mock_model_template):
     weight0 = samples0 / total_samples # 0.25
     weight1 = samples1 / total_samples # 0.75
 
-    # Calculate expected aggregated update (simple mean, not sample-weighted)
-    expected_agg_update_coef = (update0[0] + update1[0]) / 2
-    expected_agg_update_int = (update0[1] + update1[1]) / 2
+    # Calculate expected aggregated update (sample-weighted average)
+    expected_agg_update_coef = update0[0] * weight0 + update1[0] * weight1
+    expected_agg_update_int = update0[1] * weight0 + update1[1] * weight1
     expected_agg_update = [expected_agg_update_coef, expected_agg_update_int]
 
     # Calculate expected final global params: initial_params + expected_agg_update
@@ -89,7 +89,7 @@ def test_aggregator_weighted_average(simple_aggregator, mock_model_template):
     expected_final_int = initial_params[1] + expected_agg_update[1]
 
     # Perform aggregation
-    simple_aggregator.aggregate_updates(client_updates, 2)
+    simple_aggregator.aggregate_updates(client_updates)
     final_global_params = simple_aggregator.get_global_parameters()
 
     # Assert
@@ -108,9 +108,6 @@ def test_aggregator_weighted_average(simple_aggregator, mock_model_template):
 #     pass
 
 # Add to FILE: tests/test_federated_logic.py
-
-import tempfile
-import shutil
 
 @pytest.fixture
 def mock_client_data():

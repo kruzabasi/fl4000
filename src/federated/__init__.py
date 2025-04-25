@@ -1,1 +1,2 @@
-# src/federated/__init__.py
+from .aggregator import Aggregator
+from .client import Client

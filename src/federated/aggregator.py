@@ -1,3 +1,5 @@
+# FILE: src/federated/aggregator.py
+
 import numpy as np
 import random
 import copy
@@ -8,23 +10,16 @@ from typing import List, Tuple, Dict, Any, Optional
 ModelParams = List[np.ndarray]
 
 class Aggregator:
-    """
-    Coordinates the Federated Learning process by maintaining the global model,
-    selecting clients, and aggregating client updates using weighted averaging (FedAvg).
-
-    Args:
-        model_template (Any): An instance of the model to get parameter structure.
-        num_clients (int): Total number of clients available.
-        client_ids (List[str]): List of unique client identifiers.
-    """
+    """Coordinates the Federated Learning process."""
 
     def __init__(self, model_template: Any, num_clients: int, client_ids: List[str]):
         """
-        Initializes the Aggregator with the given model template and client list.
+        Initializes the Aggregator.
+
         Args:
-            model_template (Any): An instance of the model to get parameter structure.
-            num_clients (int): Total number of clients available.
-            client_ids (List[str]): List of unique client identifiers.
+            model_template: An instance of the model to get parameter structure.
+            num_clients: Total number of clients available.
+            client_ids: List of unique client identifiers.
         """
         self.global_model_params: ModelParams = model_template.get_parameters()
         self.num_clients = num_clients
@@ -37,13 +32,7 @@ class Aggregator:
 
 
     def select_clients(self, num_to_select: int) -> List[int]:
-        """
-        Selects a subset of clients randomly for the current round.
-        Args:
-            num_to_select (int): Number of clients to select.
-        Returns:
-            List[int]: Indices of selected clients.
-        """
+        """Selects a subset of clients randomly for the current round."""
         if num_to_select >= self.num_clients:
             logging.debug("Selecting all clients.")
             return list(range(self.num_clients))
@@ -53,36 +42,27 @@ class Aggregator:
             return selected_indices
 
     def get_global_parameters(self) -> ModelParams:
-        """
-        Returns a deep copy of the current global model parameters.
-        Returns:
-            ModelParams: Deep copy of the global model parameters.
-        """
+        """Returns a deep copy of the current global model parameters."""
         return copy.deepcopy(self.global_model_params)
 
     def aggregate_updates(self,
-                          client_updates: List[Tuple[ModelParams, int]],
-                          num_total_clients: int,
-                          dp_params: Optional[Dict[str, float]] = None) -> None:
+                         client_updates: List[Tuple[ModelParams, int]],
+                         num_total_clients: int,
+                         dp_params: Optional[Dict[str, float]] = None) -> None:
         """
-        Aggregates client updates (clipped), adds Gaussian noise for Central Differential Privacy (DP)
+        Aggregates client updates (clipped), adds Gaussian noise for Central DP
         if dp_params provided, and updates the global model.
-
-        Differential Privacy:
-        - Sums the clipped updates from all selected clients.
-        - If dp_params contains 'clip_norm' and 'noise_multiplier', adds Gaussian noise with std = noise_multiplier * clip_norm
-          to each layer of the summed update (Central DP, gradient perturbation).
-        - Averages the (potentially noisy) sum and applies it to the global model.
 
         Args:
             client_updates: List of tuples: (clipped_update_params, num_samples).
             num_total_clients (int): Total number of clients (N) for DP calculation.
             dp_params (Optional[Dict]): DP parameters:
+                'target_epsilon': Overall target epsilon for the training.
+                'target_delta': Overall target delta.
                 'clip_norm': Clipping norm (C_clip) used by clients.
-                'noise_multiplier': Pre-calculated noise multiplier (sigma/C_clip).
-                'target_epsilon': Target epsilon for the overall training (optional, for accounting).
-                'target_delta': Target delta for the overall training (optional, for accounting).
                 'total_rounds': Total expected training rounds (T).
+                 (Used if calculating noise per round, alternative: pass sigma directly)
+                 OR 'noise_multiplier': Pre-calculated noise multiplier (sigma/C_clip).
         """
         if not client_updates:
             logging.warning(f"Round {self.current_round}: No client updates received for aggregation.")
@@ -110,14 +90,13 @@ class Aggregator:
                 continue
             break
 
-        # 2. Calculate and Add Gaussian Noise (if DP enabled)
+        # 2. Calculate and Add Noise (if DP enabled)
         noise_std_dev = 0.0
         if dp_params and all(k in dp_params for k in ['clip_norm', 'noise_multiplier']):
             clip_norm = dp_params['clip_norm']
             noise_multiplier = dp_params['noise_multiplier']
             noise_std_dev = noise_multiplier * clip_norm
             logging.info(f"Applying DP noise: C={clip_norm:.2f}, noise_multiplier={noise_multiplier:.4f}, std_dev={noise_std_dev:.4f}")
-
         elif dp_params:
             logging.warning("DP parameters provided but 'noise_multiplier' is missing. Cannot calculate noise. Consider using a DP library (e.g., dp-accounting) to determine multiplier.")
             pass

@@ -1,24 +1,20 @@
 # Predictive Model: MultiOutput Ridge Regression
 
 ## Architecture
-- **Model:** MultiOutputRegressor wrapping Ridge regression (`sklearn.multioutput.MultiOutputRegressor`, `sklearn.linear_model.Ridge`).
-- **Purpose:** Predicts expected T+1 log returns for all assets in a single step.
+- **Model:** MultiOutput Ridge Regression (scikit-learn)
 - **Rationale:**
-  - Linear baseline model for interpretability and benchmarking.
-  - Supports multiple outputs (assets) simultaneously, matching the portfolio prediction use case.
-  - Efficient and robust for federated learning experiments.
+  - Provides a simple, interpretable linear baseline for federated learning (FL) simulations.
+  - Supports simultaneous prediction of multiple asset returns (multi-output).
+  - Well-suited for initial FL experiments due to stability and low risk of overfitting.
 
-## Inputs
-- **Feature Matrix:** Scaled numpy array or DataFrame of shape `(n_samples, n_features)`.
-  - Features should be numeric and appropriately preprocessed/scaled.
-
-## Outputs
-- **Predicted Returns Matrix:** Numpy array of shape `(n_samples, n_assets)`.
-  - Each row contains predicted T+1 log returns for all assets.
+## Input/Output
+- **Input:** Scaled feature matrix (`X`), shape `(n_samples, n_features)`
+- **Output:** Predicted T+1 log returns matrix (`y_pred`), shape `(n_samples, n_assets)`
 
 ## Loss Function
-- **Mean Squared Error (MSE):**
-  - The model is trained to minimize the average MSE across all outputs (assets).
+- **Loss:** Mean Squared Error (MSE)
+- **Definition:** Average squared difference between predicted and true T+1 log returns, averaged across all assets and samples.
 
-## Usage
-- See `src/models/predictive_model.py` for implementation details and API.
+## Usage Context
+- Used as the client-side predictive model in the federated learning framework.
+- Predicts the expected return (`μ`) for each asset for the next period, which is then used for portfolio optimization.

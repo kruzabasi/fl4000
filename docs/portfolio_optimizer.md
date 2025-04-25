@@ -1,20 +1,23 @@
-# Portfolio Optimizer: maximize Sharpe ratio (MVO)
+# Portfolio Optimizer: maximize Sharpe ratio (PyPortfolioOpt)
 
 ## Function: `optimize_portfolio`
 - **Location:** `src/portfolio_optimizer.py`
-- **Objective:** Maximize portfolio Sharpe ratio using Mean-Variance Optimization (MVO).
-- **Library:** [PyPortfolioOpt](https://github.com/robertmartin8/PyPortfolioOpt)
+
+## Purpose
+- Solves the mean-variance optimization (MVO) problem to maximize the portfolio Sharpe ratio.
+- Uses PyPortfolioOpt's `EfficientFrontier` for robust, industry-standard optimization.
 
 ## Inputs
-- **mu:** `pd.Series` of predicted expected returns (index = asset symbols).
-- **Sigma:** `pd.DataFrame` covariance matrix (index/columns = symbols).
-- **config:** Optional `dict` with keys such as `risk_free_rate` and `weight_bounds`.
+- `mu` (`pd.Series`): Predicted expected returns for each asset (index = asset symbols)
+- `Sigma` (`pd.DataFrame`): Covariance matrix of asset returns (index/columns = asset symbols)
+- `config` (`dict`): Optional configuration (e.g., risk-free rate, weight bounds)
 
 ## Output
-- **weights:** `dict` mapping asset symbols to optimal portfolio weights (sums to 1).
+- `weights` (`dict`): Optimal portfolio weights for each asset (keys = asset symbols, values = weights)
 
-## Details
-- Uses PyPortfolioOpt's `EfficientFrontier` for optimization.
-- Handles missing data and alignment between mu and Sigma.
-- Returns `None` if optimization fails or if PyPortfolioOpt is not installed.
-- See function docstring for further details.
+## Library Used
+- [PyPortfolioOpt](https://pyportfolioopt.readthedocs.io/)
+
+## Objective
+- Maximize the Sharpe ratio (risk-adjusted return)
+- Handles symbol alignment, missing data, and robust error handling

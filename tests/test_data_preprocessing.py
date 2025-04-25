@@ -12,7 +12,7 @@ from data_preprocessing import clean_data, calculate_log_returns
 def test_clean_data_fills_nan():
     """Test that clean_data correctly fills NaNs using ffill then bfill per group."""
     data = {
-        'close': [100, np.nan, 102, 103, 200, 201, np.nan, 203],
+        'adjusted_close': [100, np.nan, 102, 103, 200, 201, np.nan, 203],
         'volume': [1000, 1100, 1200, 1300, 2000, 2100, 2200, 2300],
         'symbol': ['A', 'A', 'A', 'A', 'B', 'B', 'B', 'B']
     }
@@ -27,7 +27,7 @@ def test_clean_data_fills_nan():
     # NaNs filled: A's NaN close becomes 100 (ffill). B's NaN close becomes 201 (ffill).
     expected_intermediate_data = {
         # Symbol A rows (sorted by time)
-        'close':  [100.0, 100.0, 102.0, 103.0,
+        'adjusted_close':  [100.0, 100.0, 102.0, 103.0,
         # Symbol B rows (sorted by time)
                    200.0, 201.0, 201.0, 203.0],
         'volume': [1000, 1100, 1200, 1300,
@@ -72,7 +72,7 @@ def test_clean_data_fills_nan():
 def test_calculate_log_returns_handles_groups():
     """Test log return calculation handles groups and drops first NaN."""
     data = {
-        'close': [100, 101, 102, 200, 198],
+        'adjusted_close': [100, 101, 102, 200, 198],
         'symbol': ['A', 'A', 'A', 'B', 'B']
     }
     idx = pd.to_datetime(['2023-01-01', '2023-01-02', '2023-01-03',
@@ -84,13 +84,13 @@ def test_calculate_log_returns_handles_groups():
     expected_returns = [np.log(101/100), np.log(102/101), np.log(198/200)]
     expected_idx = pd.to_datetime(['2023-01-02', '2023-01-03', '2023-01-02'])
     expected_df = pd.DataFrame({
-         'close': [101, 102, 198],
+         'adjusted_close': [101, 102, 198],
          'symbol': ['A', 'A', 'B'],
          'log_return': expected_returns,
          'timestamp': expected_idx
     }, index=expected_idx).sort_index()
 
-    result_df = calculate_log_returns(test_df, price_col='close')
+    result_df = calculate_log_returns(test_df, price_col='adjusted_close')
 
     # Sort both for comparison as order might change slightly due to groupby
     # assert_frame_equal(result_df.sort_index(), expected_df.sort_index(), check_dtype=False)
