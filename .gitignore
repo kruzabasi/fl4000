@@ -10,6 +10,7 @@ __pycache__/
 .pytest_cache/
 
 # IDE files
+.DS_Store
 .vscode/
 vs-code.edn
 .idea/
@@ -19,6 +20,10 @@ vs-code.edn
 
 # Data files (if large or sensitive - decide based on project policy)
 data/
+
+# Plots
+plots/
+scripts/
 
 # Output / Logs
 *.log

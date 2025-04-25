@@ -63,6 +63,10 @@ logging.basicConfig(
 # Ensure results directory exists
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
+# Set up organized results directory for baseline
+BASELINE_RESULTS_DIR = os.path.join(os.path.dirname(PROCESSED_DIR), "results", "baseline")
+os.makedirs(BASELINE_RESULTS_DIR, exist_ok=True)
+
 # --- Configuration ---
 PROCESSED_FILE = os.path.join(PROCESSED_DIR, 'ftse_processed_features.parquet')
 TRAIN_END_DATE = '2020-12-31'
@@ -72,20 +76,13 @@ RISK_FREE_RATE = 0.01 # Annualized
 REBALANCE_FREQ = 'W-FRI' # Weekly on Friday
 CV_SPLITS = 5 # Number of splits for TimeSeriesSplit
 
-# Define feature columns (update based on actual columns after Sprint 1)
-# Selected based on feature importance analysis
-FEATURE_COLS = [
-    'volatility_20',
-    'sma_60',
-    'sma_5',
-    'log_return_lag_2',
-    'log_return_lag_3',
-    'log_return_lag_5',
-    'quarter',
-    'log_return_lag_1',
-    'rsi_14',
-]
+# Model-specific feature selection
+from model_feature_selection import get_model_specific_features
 
+# Placeholder, will be dynamically set in main()
+FEATURE_COLS_RIDGE = None
+FEATURE_COLS_RF = None
+FEATURE_COLS_XGB = None
 
 # --- Helper Functions ---
 
@@ -137,7 +134,7 @@ def scale_features(X_train: pd.DataFrame, X_val: pd.DataFrame, X_test: pd.DataFr
     X_test_scaled = pd.DataFrame(X_test_scaled, index=X_test.index, columns=X_test.columns)
     logging.info("Features scaled.")
     # Save scaler for potential use in FL client simulation
-    scaler_path = os.path.join(RESULTS_DIR, 'baseline_scaler.pkl')
+    scaler_path = os.path.join(BASELINE_RESULTS_DIR, 'baseline_scaler.pkl')
     with open(scaler_path, 'wb') as f:
         pickle.dump(scaler, f)
     logging.info(f"Scaler saved to {scaler_path}")
@@ -539,35 +536,66 @@ def main():
         logging.error(f"Failed to load processed data from {PROCESSED_FILE}: {e}")
         return
 
-    # Define task and split data
-    X_train, y_train, X_val, y_val, X_test, y_test, test_df = define_task_and_split(
-        df_full, FEATURE_COLS, TRAIN_END_DATE, VAL_END_DATE
+    # Use all candidate features for initial split
+    candidate_features = [
+        'volatility_20', 'sma_60', 'sma_5', 'log_return_lag_2',
+        'log_return_lag_3', 'log_return_lag_5', 'quarter',
+        'log_return_lag_1', 'rsi_14'
+    ]
+    X_train_full, y_train, X_val_full, y_val, X_test_full, y_test, test_df = define_task_and_split(
+        df_full, candidate_features, TRAIN_END_DATE, VAL_END_DATE
     )
 
-    # Scale features
-    X_train_scaled, X_val_scaled, X_test_scaled, scaler = scale_features(X_train, X_val, X_test)
+    # --- Model-specific feature selection ---
+    model_features = get_model_specific_features(X_train_full, y_train, n=5)
+    global FEATURE_COLS_RIDGE, FEATURE_COLS_RF, FEATURE_COLS_XGB
+    FEATURE_COLS_RIDGE = model_features['ridge']
+    FEATURE_COLS_RF = model_features['random_forest']
+    FEATURE_COLS_XGB = model_features['xgboost']
+    logging.info(f"Selected Ridge features: {FEATURE_COLS_RIDGE}")
+    logging.info(f"Selected Random Forest features: {FEATURE_COLS_RF}")
+    logging.info(f"Selected XGBoost features: {FEATURE_COLS_XGB}")
+
+    # Prepare splits for each model
+    X_train_ridge = X_train_full[FEATURE_COLS_RIDGE]
+    X_val_ridge = X_val_full[FEATURE_COLS_RIDGE]
+    X_test_ridge = X_test_full[FEATURE_COLS_RIDGE]
+    X_train_rf = X_train_full[FEATURE_COLS_RF]
+    X_val_rf = X_val_full[FEATURE_COLS_RF]
+    X_test_rf = X_test_full[FEATURE_COLS_RF]
+    X_train_xgb = X_train_full[FEATURE_COLS_XGB] if FEATURE_COLS_XGB else None
+    X_val_xgb = X_val_full[FEATURE_COLS_XGB] if FEATURE_COLS_XGB else None
+    X_test_xgb = X_test_full[FEATURE_COLS_XGB] if FEATURE_COLS_XGB else None
+
+    # Scale features (per model)
+    X_train_scaled_ridge, X_val_scaled_ridge, X_test_scaled_ridge, scaler_ridge = scale_features(X_train_ridge, X_val_ridge, X_test_ridge)
+    X_train_scaled_rf, X_val_scaled_rf, X_test_scaled_rf, scaler_rf = scale_features(X_train_rf, X_val_rf, X_test_rf)
+    if FEATURE_COLS_XGB:
+        X_train_scaled_xgb, X_val_scaled_xgb, X_test_scaled_xgb, scaler_xgb = scale_features(X_train_xgb, X_val_xgb, X_test_xgb)
+    else:
+        X_train_scaled_xgb = X_val_scaled_xgb = X_test_scaled_xgb = None
 
     # Tune and Train Models
     # Ridge
     ridge_params = {'alpha': [0.1, 1.0, 10.0, 50.0, 100.0, 200.0]}
-    final_ridge = tune_and_train_model("Ridge", Ridge(), ridge_params, X_train_scaled, y_train, CV_SPLITS)
+    final_ridge = tune_and_train_model("Ridge", Ridge(), ridge_params, X_train_scaled_ridge, y_train, CV_SPLITS)
 
     # RandomForest
     rf_params = {'n_estimators': [100, 200], 'max_depth': [10, 20], 'min_samples_split': [5, 10]}
-    final_rf = tune_and_train_model("RandomForest", RandomForestRegressor(random_state=42, n_jobs=-1), rf_params, X_train_scaled, y_train, CV_SPLITS, use_random_search=True, n_iter=6)
+    final_rf = tune_and_train_model("RandomForest", RandomForestRegressor(random_state=42, n_jobs=-1), rf_params, X_train_scaled_rf, y_train, CV_SPLITS, use_random_search=True, n_iter=6)
 
     # XGBoost
     final_xgb = None
-    if xgb:
+    if xgb and FEATURE_COLS_XGB:
         xgb_params = {'n_estimators': [100, 200, 300], 'max_depth': [3, 5, 7], 'learning_rate': [0.01, 0.05, 0.1], 'subsample': [0.7, 0.9], 'colsample_bytree': [0.7, 0.9]}
-        final_xgb = tune_and_train_model("XGBoost", xgb.XGBRegressor(objective='reg:squarederror', random_state=42, n_jobs=-1), xgb_params, X_train_scaled, y_train, CV_SPLITS, use_random_search=True, n_iter=10)
+        final_xgb = tune_and_train_model("XGBoost", xgb.XGBRegressor(objective='reg:squarederror', random_state=42, n_jobs=-1), xgb_params, X_train_scaled_xgb, y_train, CV_SPLITS, use_random_search=True, n_iter=10)
     else:
         logging.info("Skipping XGBoost tuning and training.")
 
     # Evaluate Predictions on Validation Set
-    val_pred_ridge = evaluate_predictions("Ridge", final_ridge, X_val_scaled, y_val)
-    val_pred_rf = evaluate_predictions("RandomForest", final_rf, X_val_scaled, y_val) if final_rf else None
-    val_pred_xgb = evaluate_predictions("XGBoost", final_xgb, X_val_scaled, y_val) if final_xgb else None
+    val_pred_ridge = evaluate_predictions("Ridge", final_ridge, X_val_scaled_ridge, y_val)
+    val_pred_rf = evaluate_predictions("RandomForest", final_rf, X_val_scaled_rf, y_val) if final_rf else None
+    val_pred_xgb = evaluate_predictions("XGBoost", final_xgb, X_val_scaled_xgb, y_val) if final_xgb and X_val_scaled_xgb is not None else None
     # Log validation metrics
     val_mse_ridge = mean_squared_error(y_val, val_pred_ridge)
     val_r2_ridge = r2_score(y_val, val_pred_ridge)
@@ -593,14 +621,21 @@ def main():
             best_val_mse = val_mse_xgb
     logging.info(f"Selected best model based on validation MSE: {best_model_name}")
 
-    # Evaluate Predictions (on test set) for best model only
+    # Evaluate Predictions (on test set) for all models
     all_preds = test_df[['symbol']].copy()
     all_preds['actual'] = y_test.values
-    pred_best = evaluate_predictions(best_model_name, best_model, X_test_scaled, y_test)
-    all_preds[f'{best_model_name.lower()}_pred'] = pred_best.values
+    if final_ridge:
+        pred_ridge = evaluate_predictions("Ridge", final_ridge, X_test_scaled_ridge, y_test)
+        all_preds['ridge_pred'] = pred_ridge.values
+    if final_rf:
+        pred_rf = evaluate_predictions("RandomForest", final_rf, X_test_scaled_rf, y_test)
+        all_preds['randomforest_pred'] = pred_rf.values
+    if final_xgb:
+        pred_xgb = evaluate_predictions("XGBoost", final_xgb, X_test_scaled_xgb, y_test)
+        all_preds['xgboost_pred'] = pred_xgb.values
 
     # Save predictions
-    preds_path = os.path.join(RESULTS_DIR, 'baseline_predictions.csv')
+    preds_path = os.path.join(BASELINE_RESULTS_DIR, 'baseline_predictions.csv')
     all_preds.to_csv(preds_path)
     logging.info(f"Baseline predictions saved to {preds_path}")
 
@@ -611,7 +646,7 @@ def main():
         test_df_reset = test_df.copy()
     test_df_reset = test_df_reset.set_index(['datetime_idx', 'symbol'])
 
-    # Run Portfolio Simulation for best model only
+    # Run Portfolio Simulation for all models
     portfolio_time_series = run_portfolio_simulation(
         all_preds, # Contains predictions and symbol column
         test_df_reset, # Now has MultiIndex (datetime_idx, symbol)
@@ -623,16 +658,23 @@ def main():
     portfolio_metrics = evaluate_portfolio(portfolio_time_series, RISK_FREE_RATE)
 
     # Save metrics
-    metrics_path = os.path.join(RESULTS_DIR, 'baseline_portfolio_metrics.csv')
+    metrics_path = os.path.join(BASELINE_RESULTS_DIR, 'baseline_portfolio_metrics.csv')
     if portfolio_metrics:
          pd.DataFrame.from_dict(portfolio_metrics, orient='index').to_csv(metrics_path)
          logging.info(f"Portfolio metrics saved to {metrics_path}")
 
-    # Save final models
-    model_path = os.path.join(RESULTS_DIR, f'baseline_{best_model_name.lower()}_model.pkl')
-    with open(model_path, 'wb') as f:
-        pickle.dump(best_model, f)
-    logging.info(f"{best_model_name} model saved to {model_path}")
+    # Save final models for ALL models, not just best
+    for model_name, model_obj in zip(["ridge", "randomforest", "xgboost"], [final_ridge, final_rf, final_xgb]):
+        if model_obj is not None:
+            model_path = os.path.join(BASELINE_RESULTS_DIR, f'baseline_{model_name}_model.pkl')
+            with open(model_path, 'wb') as f:
+                pickle.dump(model_obj, f)
+            logging.info(f"{model_name.title()} model saved to {model_path}")
+
+    # Select best model based on Sharpe Ratio, not validation MSE
+    best_model_name = max(portfolio_metrics, key=lambda k: portfolio_metrics[k]['Sharpe'] if not np.isnan(portfolio_metrics[k]['Sharpe']) else float('-inf'))
+    best_model = {'ridge': final_ridge, 'randomforest': final_rf, 'xgboost': final_xgb}[best_model_name]
+    logging.info(f"Selected best model based on Sharpe Ratio: {best_model_name}")
 
     logging.info("--- Baseline Evaluation Pipeline Finished ---")
     logging.info("----------------------------------------------------------------------------------------------")
