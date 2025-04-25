@@ -12,7 +12,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s: %(message)s"
     )
 
-def add_moving_averages(df: pd.DataFrame, windows: List[int] = [5, 20, 60], price_col: str = 'close') -> pd.DataFrame:
+def add_moving_averages(df: pd.DataFrame, windows: List[int] = [5, 20, 60], price_col: str = 'adjusted_close') -> pd.DataFrame:
     """
     Adds Simple Moving Averages (SMA) for specified windows, grouped by symbol.
 
@@ -159,7 +159,7 @@ def add_momentum_indicators(df: pd.DataFrame, rsi_window: int = 14, macd_fast: i
     """
     Adds momentum indicators such as RSI and MACD to the DataFrame using the 'ta' library.
     Args:
-        df (pd.DataFrame): Input DataFrame, must contain 'close' column.
+        df (pd.DataFrame): Input DataFrame, must contain 'adjusted_close' column.
         rsi_window (int): Window size for RSI calculation.
         macd_fast (int): Fast EMA period for MACD.
         macd_slow (int): Slow EMA period for MACD.
@@ -167,11 +167,11 @@ def add_momentum_indicators(df: pd.DataFrame, rsi_window: int = 14, macd_fast: i
     Returns:
         pd.DataFrame: DataFrame with new columns: 'rsi', 'macd', 'macd_signal', 'macd_diff'.
     """
-    if 'close' not in df.columns:
-        raise ValueError("'close' column required for momentum indicators.")
+    if 'adjusted_close' not in df.columns:
+        raise ValueError("'adjusted_close' column required for momentum indicators.")
     df = df.copy()
-    df['rsi'] = ta.momentum.RSIIndicator(close=df['close'], window=rsi_window, fillna=True).rsi()
-    macd = ta.trend.MACD(close=df['close'], window_slow=macd_slow, window_fast=macd_fast, window_sign=macd_signal, fillna=True)
+    df['rsi'] = ta.momentum.RSIIndicator(close=df['adjusted_close'], window=rsi_window, fillna=True).rsi()
+    macd = ta.trend.MACD(close=df['adjusted_close'], window_slow=macd_slow, window_fast=macd_fast, window_sign=macd_signal, fillna=True)
     df['macd'] = macd.macd()
     df['macd_signal'] = macd.macd_signal()
     df['macd_diff'] = macd.macd_diff()
@@ -182,13 +182,13 @@ def add_volume_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     Adds volume-based indicators such as On-Balance Volume (OBV) to the DataFrame using the 'ta' library.
     Args:
-        df (pd.DataFrame): Input DataFrame, must contain 'close' and 'volume' columns.
+        df (pd.DataFrame): Input DataFrame, must contain 'adjusted_close' and 'volume' columns.
     Returns:
         pd.DataFrame: DataFrame with new column: 'obv'.
     """
-    if 'close' not in df.columns or 'volume' not in df.columns:
-        raise ValueError("'close' and 'volume' columns required for OBV indicator.")
+    if 'adjusted_close' not in df.columns or 'volume' not in df.columns:
+        raise ValueError("'adjusted_close' and 'volume' columns required for OBV indicator.")
     df = df.copy()
-    df['obv'] = ta.volume.OnBalanceVolumeIndicator(close=df['close'], volume=df['volume'], fillna=True).on_balance_volume()
+    df['obv'] = ta.volume.OnBalanceVolumeIndicator(close=df['adjusted_close'], volume=df['volume'], fillna=True).on_balance_volume()
     logging.info("Added OBV indicator.")
     return df

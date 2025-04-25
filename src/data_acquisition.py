@@ -314,9 +314,9 @@ def main():
     log_and_print("=== Starting Data Acquisition Process ===")
 
     # Optional: Initial download for symbols defined in config (if needed)
-    # log_and_print("--- Running Initial Batch Download ---")
-    # initial_completed, initial_unsuccessful = download_data_batch(SYMBOLS)
-    # log_and_print(f"Initial download result - Completed: {len(initial_completed)}, Unsuccessful: {len(initial_unsuccessful)}")
+    log_and_print("--- Running Initial Batch Download ---")
+    initial_completed, initial_unsuccessful = download_data_batch(SYMBOLS)
+    log_and_print(f"Initial download result - Completed: {len(initial_completed)}, Unsuccessful: {len(initial_unsuccessful)}")
 
     # --- Attempt to redownload any files previously failed due to rate limits ---
     redownload_success, redownload_fail = redownload_failed_files()

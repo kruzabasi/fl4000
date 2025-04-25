@@ -8,7 +8,7 @@ load_dotenv()
 # Alpha Vantage API configuration
 ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
 BASE_URL = "https://www.alphavantage.co/query"
-FUNCTION = "TIME_SERIES_DAILY"
+FUNCTION = "TIME_SERIES_DAILY_ADJUSTED"
 OUTPUT_SIZE = "full" # Get all available data
 DATATYPE = "csv" # for easier parsing with pandas
 

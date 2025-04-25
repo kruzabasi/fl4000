@@ -33,7 +33,7 @@ def load_raw_data(raw_dir: str = DATA_DIR, symbols: Optional[List[str]] = None) 
         all_files = [f for f in all_files if os.path.splitext(os.path.basename(f))[0] in symbols]
 
     dfs = []
-    required_cols = {'timestamp', 'open', 'high', 'low', 'close', 'volume'}
+    required_cols = {'timestamp', 'open', 'high', 'low', 'adjusted_close', 'volume'}
     for file in all_files:
         try:
             df = pd.read_csv(file)
@@ -55,7 +55,7 @@ def load_raw_data(raw_dir: str = DATA_DIR, symbols: Optional[List[str]] = None) 
 
     combined = pd.concat(dfs, ignore_index=True)
     # Ensure essential columns exist after standardization
-    expected_cols = ['symbol', 'open', 'high', 'low', 'close', 'volume']
+    expected_cols = ['symbol', 'open', 'high', 'low', 'adjusted_close', 'volume']
     missing_cols = [col for col in expected_cols if col not in combined.columns]
     if missing_cols:
         logging.warning(f"Combined DataFrame missing essential columns: {missing_cols}")
@@ -168,7 +168,7 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
 
     return df_final
 
-def calculate_log_returns(df: pd.DataFrame, price_col: str = 'close') -> pd.DataFrame:
+def calculate_log_returns(df: pd.DataFrame, price_col: str = 'adjusted_close') -> pd.DataFrame:
     """
     Calculates the logarithmic returns for the specified price column,
     grouped by symbol. Drops rows where return cannot be calculated (first row per symbol).

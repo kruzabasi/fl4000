@@ -4,7 +4,7 @@
 - **Provider:** Alpha Vantage API
 - **Universe:** FTSE 100 constituent stocks (sample)
 - **Symbols:** e.g., SHEL.LON, BP.LON, HSBA.LON, etc. (see `config.py` for sample list)
-- **Date Range:** Full available history per symbol (via `TIME_SERIES_DAILY`, `OUTPUT_SIZE=full`)
+- **Date Range:** Full available history per symbol (via `TIME_SERIES_DAILY_ADJUSTED`, `OUTPUT_SIZE=full`)
 - **Format:** Daily OHLCV (Open, High, Low, Close, Volume) data, CSV
 
 ## 2. Data Acquisition
