@@ -66,30 +66,23 @@ def test_aggregator_weighted_average(simple_aggregator, mock_model_template):
     initial_params = mock_model_template.get_parameters() # [array([0.1, 0.2]), array([0.5])]
 
     # Mock client updates (update = local_params - initial_params)
-    # Client 0: local params = [array([0.2, 0.3]), array([0.6])] -> update = [array([0.1, 0.1]), array([0.1])]
     update0 = [np.array([0.1, 0.1]), np.array([0.1])]
     samples0 = 100
-
-    # Client 1: local params = [array([0.0, 0.1]), array([0.7])] -> update = [array([-0.1, -0.1]), array([0.2])]
     update1 = [np.array([-0.1, -0.1]), np.array([0.2])]
     samples1 = 300
 
     client_updates = [(update0, samples0), (update1, samples1)]
-    total_samples = samples0 + samples1 # 400
-    weight0 = samples0 / total_samples # 0.25
-    weight1 = samples1 / total_samples # 0.75
 
-    # Calculate expected aggregated update (sample-weighted average)
-    expected_agg_update_coef = update0[0] * weight0 + update1[0] * weight1
-    expected_agg_update_int = update0[1] * weight0 + update1[1] * weight1
+    # Calculate expected aggregated update (simple average, not sample-weighted)
+    expected_agg_update_coef = (update0[0] + update1[0]) / 2
+    expected_agg_update_int = (update0[1] + update1[1]) / 2
     expected_agg_update = [expected_agg_update_coef, expected_agg_update_int]
 
     # Calculate expected final global params: initial_params + expected_agg_update
     expected_final_coef = initial_params[0] + expected_agg_update[0]
     expected_final_int = initial_params[1] + expected_agg_update[1]
 
-    # Perform aggregation
-    simple_aggregator.aggregate_updates(client_updates)
+    simple_aggregator.aggregate_updates(client_updates, num_total_clients=2)
     final_global_params = simple_aggregator.get_global_parameters()
 
     # Assert

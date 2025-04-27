@@ -17,9 +17,10 @@ except ImportError:
     logging.error("Failed to import necessary modules. Check paths and file names.")
     exit(1)
 
+# --- DP-accounting import fix ---
 try:
-    from dp_accounting import dp_event
-    from dp_accounting import privacy_accountant
+    from dp_accounting.accountant import GaussianAccountant # Correct import for dp-accounting >=0.4.4
+    from dp_accounting.dp_event import DpEvent, SampledDpEvent, GaussianDpEvent
     ACCOUNTING_LIB_AVAILABLE = True
 except ImportError:
     logging.warning("dp-accounting library not found. Cannot perform rigorous privacy accounting.")
@@ -67,11 +68,28 @@ def run_simulation():
 
     # 3. Initialize Clients
     clients: List[Client] = []
+    # Infer n_outputs from data
+    n_outputs = None
+    try:
+        # Try to infer n_outputs from the temp_df loaded above
+        target_col = 'target_log_return'
+        if target_col in temp_df.columns:
+            # If target is a single column, n_outputs = 1
+            n_outputs = 1
+            # If target is a multi-output (e.g., pivoted), set accordingly
+            # Uncomment and adjust if your pipeline pivots targets by symbol
+            # n_outputs = temp_df.pivot(columns='symbol', values=target_col).shape[1]
+        else:
+            n_outputs = 1
+    except Exception as e:
+        logging.warning(f"Could not infer n_outputs from data: {e}. Defaulting to 1.")
+        n_outputs = 1
+
     for i in range(config.NUM_CLIENTS):
         client_id = all_client_ids[i]
         data_path = os.path.join(config.FEDERATED_DATA_DIR, client_id, "client_data.parquet")
         if os.path.exists(data_path):
-            client = Client(client_id, model_template, data_path, random_seed=config.RANDOM_SEED + i)
+            client = Client(client_id, n_features, n_outputs, data_path, random_seed=config.RANDOM_SEED + i)
             # Only add client if they successfully loaded data
             if client.num_samples > 0:
                  clients.append(client)
@@ -99,9 +117,9 @@ def run_simulation():
 
     # --- Initialize Privacy Accountant ---
     accountant = None
+    num_total_clients_for_dp = config.NUM_CLIENTS  # Ensure this is always defined
     if ACCOUNTING_LIB_AVAILABLE:
-        num_total_clients_for_dp = config.NUM_CLIENTS
-        accountant = privacy_accountant.GaussianAccountant(max_compositions=TOTAL_ROUNDS * 2)
+        accountant = GaussianAccountant(max_compositions=TOTAL_ROUNDS * 2)
         sampling_probability = min(1.0, CLIENTS_PER_ROUND / num_total_clients_for_dp)
         if sampling_probability > 0:
             try:
@@ -179,8 +197,8 @@ def run_simulation():
             # --- Compose Privacy Budget ---
             if ACCOUNTING_LIB_AVAILABLE and accountant and DP_PARAMS and DP_PARAMS.get('noise_multiplier') and sampling_probability_this_round > 0:
                 try:
-                    event = dp_event.GaussianDpEvent(DP_PARAMS['noise_multiplier'])
-                    event = dp_event.SampledDpEvent(sampling_probability_this_round, event)
+                    event = GaussianDpEvent(DP_PARAMS['noise_multiplier'])
+                    event = SampledDpEvent(sampling_probability_this_round, event)
                     accountant.compose(event, count=1)
                     spent_epsilon, spent_delta = accountant.get_epsilon_and_delta(DP_PARAMS['target_delta'])
                     logging.info(f"Privacy Check - Round {t+1}: Spent Epsilon={spent_epsilon:.4f} (Delta={spent_delta:.1E})")

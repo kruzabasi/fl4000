@@ -42,6 +42,12 @@ Follow these steps to set up the project environment:
         ```
     You should see `(.venv)` at the beginning of your terminal prompt when the environment is active.
 
+    **Troubleshooting:**
+    If you see an error like `source: no such file or directory: .venv/bin/activate`, it means the virtual environment has not been created yet. Run `python3 -m venv .venv` in the project directory to create it, then activate as above.
+
+    **Best Practice:**
+    For all development and execution, use the virtual environment by running Python scripts with `.venv/bin/python` or after activating the environment with `source .venv/bin/activate` to ensure dependencies are correctly managed and isolated.
+
 5.  **Install Dependencies:**
     Install the required Python packages from the `requirements.txt` file.
     ```bash
@@ -65,5 +71,4 @@ All tests should pass successfully. The test suite covers:
 (Placeholder) Run the main simulation script to start a federated learning experiment:
 
 ```bash
-python src/main_simulation.py --config <path_to_config_file>
-```
+.venv/bin/python src/main_simulation.py --config <path_to_config_file>

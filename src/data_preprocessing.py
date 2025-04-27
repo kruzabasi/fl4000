@@ -183,13 +183,16 @@ def calculate_log_returns(df: pd.DataFrame, price_col: str = 'adjusted_close') -
         raise ValueError(f"Price column '{price_col}' not found in DataFrame.")
     if 'symbol' not in df.columns:
         logging.error("Missing 'symbol' column for grouping. Calculating returns globally.")
-        df['log_return'] = np.log(df[price_col] / df[price_col].shift(1))
+        price = df[price_col]
+        price_shifted = price.shift(1)
+        mask = (price > 0) & (price_shifted > 0)
+        df['log_return'] = np.where(mask, np.log(price / price_shifted), np.nan)
     else:
         if 'timestamp' not in df.columns and isinstance(df.index, pd.DatetimeIndex):
             df = df.reset_index().rename(columns={'index': 'timestamp'})
         df = df.sort_values(by=['symbol', 'timestamp'])
         df['log_return'] = df.groupby('symbol')[price_col].transform(
-            lambda x: np.log(x / x.shift(1))
+            lambda x: np.where((x > 0) & (x.shift(1) > 0), np.log(x / x.shift(1)), np.nan)
         )
     initial_rows = df.shape[0]
     df = df.dropna(subset=['log_return']) # Drop rows with NaN returns

@@ -117,6 +117,14 @@ def define_task_and_split(df: pd.DataFrame, feature_cols: List[str],
     y_test = test_df['target']
 
     logging.info(f"Train shape: {X_train.shape}, Val shape: {X_val.shape}, Test shape: {X_test.shape}")
+
+    # --- Add NaN/Inf checks ---
+    logging.info(f"NaNs in X_train before scaling: {X_train.isna().sum().sum()}")
+    logging.info(f"Infs in X_train before scaling: {np.isinf(X_train).sum().sum()}")
+    logging.info(f"NaNs in y_train: {y_train.isna().sum()}")
+    logging.info(f"Infs in y_train: {np.isinf(y_train).sum()}")
+    # --- End checks ---
+
     return X_train, y_train, X_val, y_val, X_test, y_test, test_df
 
 
@@ -132,6 +140,12 @@ def scale_features(X_train: pd.DataFrame, X_val: pd.DataFrame, X_test: pd.DataFr
     X_train_scaled = pd.DataFrame(X_train_scaled, index=X_train.index, columns=X_train.columns)
     X_val_scaled = pd.DataFrame(X_val_scaled, index=X_val.index, columns=X_val.columns)
     X_test_scaled = pd.DataFrame(X_test_scaled, index=X_test.index, columns=X_test.columns)
+
+    # --- Add NaN/Inf checks after scaling ---
+    logging.info(f"NaNs in X_train after scaling: {X_train_scaled.isna().sum().sum()}")
+    logging.info(f"Infs in X_train after scaling: {np.isinf(X_train_scaled).sum().sum()}")
+    # --- End checks ---
+
     logging.info("Features scaled.")
     # Save scaler for potential use in FL client simulation
     scaler_path = os.path.join(BASELINE_RESULTS_DIR, 'baseline_scaler.pkl')
@@ -155,6 +169,13 @@ def tune_and_train_model(model_name: str, model_instance: Any, params: Dict,
         search = GridSearchCV(model_instance, params, cv=tscv,
                               scoring='neg_mean_squared_error', n_jobs=-1, verbose=1)
 
+    validate_data(X_train, y_train, context="[Before Model Fit]")
+    cols_to_drop = deep_feature_diagnostics(X_train, context="[Before Model Fit]")
+    if cols_to_drop:
+        logging.warning(f"[Cleaning] Dropping columns before model fit: {cols_to_drop}")
+        logging.warning(f"[Cleaning] X_train shape before: {X_train.shape}")
+        X_train = clean_features(X_train, cols_to_drop)
+        logging.warning(f"[Cleaning] X_train shape after: {X_train.shape}")
     search.fit(X_train, y_train) # Assumes X_train is scaled already
     best_params = search.best_params_
     best_score = -search.best_score_ # Score is negative MSE
@@ -163,6 +184,13 @@ def tune_and_train_model(model_name: str, model_instance: Any, params: Dict,
 
     # Train final model on the entire training set with best parameters
     final_model = model_instance.set_params(**best_params)
+    validate_data(X_train, y_train, context="[Before Final Model Fit]")
+    cols_to_drop_final = deep_feature_diagnostics(X_train, context="[Before Final Model Fit]")
+    if cols_to_drop_final:
+        logging.warning(f"[Cleaning] Dropping columns before final model fit: {cols_to_drop_final}")
+        logging.warning(f"[Cleaning] X_train shape before: {X_train.shape}")
+        X_train = clean_features(X_train, cols_to_drop_final)
+        logging.warning(f"[Cleaning] X_train shape after: {X_train.shape}")
     final_model.fit(X_train, y_train)
     logging.info(f"Final {model_name} trained on full training set.")
     return final_model
@@ -171,6 +199,13 @@ def tune_and_train_model(model_name: str, model_instance: Any, params: Dict,
 def evaluate_predictions(model_name: str, model: Any, X_test: pd.DataFrame, y_test: pd.Series) -> pd.Series:
     """Makes predictions and evaluates MSE and R2."""
     logging.info(f"Evaluating {model_name} predictions...")
+    validate_data(X_test, y_test, context="[Before Model Predict]")
+    cols_to_drop_test = deep_feature_diagnostics(X_test, context="[Before Model Predict]")
+    if cols_to_drop_test:
+        logging.warning(f"[Cleaning] Dropping columns before model predict: {cols_to_drop_test}")
+        logging.warning(f"[Cleaning] X_test shape before: {X_test.shape}")
+        X_test = clean_features(X_test, cols_to_drop_test)
+        logging.warning(f"[Cleaning] X_test shape after: {X_test.shape}")
     y_pred = model.predict(X_test) # Assumes X_test is scaled
     mse = mean_squared_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
@@ -364,7 +399,7 @@ def run_portfolio_simulation(predictions: pd.DataFrame, actual_returns: pd.DataF
                         else:
                             returns_subset = returns_up_to_today[common_symbols].iloc[-lookback:]
                             # Instead of returns_subset.dropna(axis=1, how='any'), use forward fill then zero fill
-                            returns_subset = returns_subset.fillna(method='ffill').fillna(0)
+                            returns_subset = returns_subset.ffill().fillna(0)
                             if returns_subset.shape[1] < 2: # Need at least 2 assets for meaningful covariance/optimization
                                  logging.warning(f"Not enough valid assets ({returns_subset.shape[1]}) after filtering NaNs for cov calc on {today.date()}. Holding.")
                                  weights_to_use = current_weights
@@ -432,6 +467,8 @@ def run_portfolio_simulation(predictions: pd.DataFrame, actual_returns: pd.DataF
                  initial_symbols = actual_returns.loc[unique_test_dates[0]].index.get_level_values('symbol').unique()
                  if not initial_symbols.empty:
                      n_assets = len(initial_symbols)
+                     if n_assets == 0:
+                         raise ValueError("Number of assets is zero, cannot assign weights.")
                      current_weights = pd.Series(1/n_assets, index=initial_symbols)
                      logging.info(f"Initialized with {n_assets} assets.")
                  else:
@@ -470,8 +507,12 @@ def run_portfolio_simulation(predictions: pd.DataFrame, actual_returns: pd.DataF
                          logging.warning(f"No common assets between returns and weights for {next_day.date()}. Portfolio return is 0.")
                          port_return = 0.0
                     else:
-                         # Normalize weights if they don't sum to 1 after alignment (e.g., asset dropped)
-                         aligned_weights /= aligned_weights.sum()
+                         # Defensive normalization to avoid division by zero
+                         total = aligned_weights.sum()
+                         if total == 0:
+                             aligned_weights[:] = 1.0 / len(aligned_weights)
+                         else:
+                             aligned_weights /= total
                          port_return = np.dot(aligned_returns, aligned_weights)
 
                     daily_returns.append({'timestamp': next_day, 'return': port_return})
@@ -523,6 +564,89 @@ def evaluate_portfolio(portfolio_returns: Dict[str, pd.Series], risk_free: float
             logging.warning(f"No valid portfolio returns generated for model: {model_name}")
             results[model_name] = {'Sharpe': np.nan, 'Max Drawdown': np.nan, 'VaR_95': np.nan, 'CVaR_95': np.nan}
     return results
+
+
+# --- Data Validation Utility ---
+def validate_data(X, y=None, context=""):
+    import numpy as np
+    import pandas as pd
+    if isinstance(X, pd.DataFrame):
+        X_vals = X.values
+    else:
+        X_vals = X
+    if not np.all(np.isfinite(X_vals)):
+        logging.warning(f"[Data Validation] Non-finite values (NaN/inf) found in features {context}!")
+        # Optionally, print column indices/names with issues
+        if isinstance(X, pd.DataFrame):
+            bad_cols = X.columns[~np.isfinite(X_vals).all(axis=0)]
+            logging.warning(f"Bad columns: {bad_cols}")
+    if y is not None and not np.all(np.isfinite(y)):
+        logging.warning(f"[Data Validation] Non-finite values (NaN/inf) found in target {context}!")
+
+
+# --- Feature Cleaning Utility ---
+def get_problematic_columns(X):
+    import numpy as np
+    import pandas as pd
+    if isinstance(X, pd.DataFrame):
+        X_vals = X.values
+        columns = X.columns.tolist()
+    else:
+        X_vals = X
+        columns = [f"col_{i}" for i in range(X.shape[1])]
+    mask_non_finite = ~np.isfinite(X_vals).all(axis=0)
+    mask_const = np.nanstd(X_vals, axis=0) == 0
+    mask_zero = (X_vals == 0).all(axis=0)
+    mask_extreme = (np.abs(X_vals) > 1e10).any(axis=0) | (((np.abs(X_vals) < 1e-10) & (X_vals != 0)).any(axis=0))
+    all_problematic = np.array(columns)[mask_non_finite | mask_const | mask_zero | mask_extreme]
+    return list(all_problematic)
+
+def clean_features(X, columns_to_drop):
+    import pandas as pd
+    if not columns_to_drop:
+        return X
+    if isinstance(X, pd.DataFrame):
+        return X.drop(columns=columns_to_drop, errors='ignore')
+    else:
+        import numpy as np
+        idx_to_drop = [int(col.split('_')[-1]) for col in columns_to_drop if col.startswith('col_')]
+        if not idx_to_drop:
+            return X
+        keep_idx = [i for i in range(X.shape[1]) if i not in idx_to_drop]
+        return X[:, keep_idx]
+
+# --- Deep Feature Diagnostics Utility ---
+def deep_feature_diagnostics(X, context=""):
+    import numpy as np
+    import pandas as pd
+    import logging
+    if isinstance(X, pd.DataFrame):
+        X_vals = X.values
+        columns = X.columns.tolist()
+    else:
+        X_vals = X
+        columns = [f"col_{i}" for i in range(X.shape[1])]
+    mask_const = np.nanstd(X_vals, axis=0) == 0
+    mask_zero = (X_vals == 0).all(axis=0)
+    mask_extreme = (np.abs(X_vals) > 1e10).any(axis=0)
+    mask_small = ((np.abs(X_vals) < 1e-10) & (X_vals != 0)).any(axis=0)
+    mask_non_finite = ~np.isfinite(X_vals).all(axis=0)
+    const_cols = list(np.array(columns)[mask_const])
+    zero_cols = list(np.array(columns)[mask_zero])
+    extreme_cols = list(np.array(columns)[mask_extreme])
+    small_cols = list(np.array(columns)[mask_small])
+    non_finite_cols = list(np.array(columns)[mask_non_finite])
+    if const_cols:
+        logging.warning(f"[Diagnostics] Constant columns in {context}: {const_cols}")
+    if zero_cols:
+        logging.warning(f"[Diagnostics] All-zero columns in {context}: {zero_cols}")
+    if extreme_cols:
+        logging.warning(f"[Diagnostics] Extreme values (>1e10) in {context}: {extreme_cols}")
+    if small_cols:
+        logging.warning(f"[Diagnostics] Very small nonzero values (<1e-10) in {context}: {small_cols}")
+    if non_finite_cols:
+        logging.warning(f"[Diagnostics] Non-finite values in {context}: {non_finite_cols}")
+    return list(set(const_cols + zero_cols + extreme_cols + small_cols + non_finite_cols))
 
 
 # --- Main Execution ---

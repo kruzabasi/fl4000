@@ -9,17 +9,16 @@ import os
 import sys
 
 # Add src directory to path to import config (adjust relative path if needed)
-# Assumes the notebook is run from the 'notebooks' directory
-module_path = os.path.abspath(os.path.join('..'))
-if module_path not in sys.path:
-    sys.path.append(module_path)
+src_path = os.path.abspath(os.path.join('../', 'src'))
+if src_path not in sys.path:
+    sys.path.append(src_path)
 
 try:
     import config # Import config variables
 except ImportError:
     print("Could not import config.py. Ensure it's accessible and define paths manually.")
     # Define paths manually as fallback
-    PROCESSED_DIR = '../data/processed' # Adjusted relative path
+    PROCESSED_DIR = './data/processed' # Adjusted relative path
     OUTPUT_FILENAME = 'ftse_processed_features.parquet'
     # Define a default symbol if config.SYMBOLS is not available
     DEFAULT_SYMBOL = 'AZN.LON' # Example fallback

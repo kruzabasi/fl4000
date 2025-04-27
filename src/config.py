@@ -30,8 +30,6 @@ SLEEP_DURATION = 12
 DATA_DIR = os.path.join("data", "raw")
 PROCESSED_DIR = os.path.join("data", "processed")
 NORMALIZED_DIR = os.path.join("data", "normalized")
-RAW_T_DATA_DIR = os.path.join("data", "raw_t")
-
 # Federated Learning Simulation Configuration
 # Update these paths as needed for your environment
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -46,7 +44,6 @@ CLIENTS_PER_ROUND = 5  # Number of clients per round (adjust as needed)
 
 # Ensure the data directories exist
 os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(RAW_T_DATA_DIR, exist_ok=True)
 
 # GCIs
 GCIS = get_gcis()
