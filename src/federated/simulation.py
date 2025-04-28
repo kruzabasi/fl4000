@@ -244,6 +244,22 @@ def run_fl_simulation(fl_params, dp_params, model_params, non_iid_params, seed, 
         'metrics': metrics
     }
 
+def run_simulation():
+    """
+    Legacy CLI entry point for running the federated simulation with config module globals.
+    Loads config and calls run_fl_simulation with appropriate arguments.
+    """
+    import config as global_config
+    # Extract parameters from config
+    fl_params = getattr(global_config, 'FL_PARAMS', {})
+    dp_params = getattr(global_config, 'DP_PARAMS', {})
+    model_params = getattr(global_config, 'MODEL_PARAMS', {})
+    non_iid_params = getattr(global_config, 'NON_IID_PARAMS', {})
+    seed = getattr(global_config, 'RANDOM_SEED', 42)
+    experiment_id = getattr(global_config, 'EXPERIMENT_ID', None)
+    results_dir = getattr(global_config, 'RESULTS_DIR', None)
+    return run_fl_simulation(fl_params, dp_params, model_params, non_iid_params, seed, experiment_id, results_dir)
+
 # Keep legacy CLI
 if __name__ == "__main__":
     run_simulation()

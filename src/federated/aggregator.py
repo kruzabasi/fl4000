@@ -79,12 +79,12 @@ class Aggregator:
         # Diagnostic: log pre-aggregation global param stats
         pre_params = [p.copy() for p in self.global_model_params]
 
-        # 1. Sum Clipped Updates
+        # 1. Sum Clipped Updates (sample-weighted)
         summed_update: ModelParams = [np.zeros_like(layer) for layer in self.global_model_params]
-        for update_params, _ in client_updates:
+        for update_params, num_samples in client_updates:
             for i in range(len(summed_update)):
                 if update_params[i].shape == summed_update[i].shape:
-                    summed_update[i] += update_params[i]
+                    summed_update[i] += update_params[i] * num_samples
                 else:
                     logging.error(f"Shape mismatch during update summation! Layer {i}. Skipping this update.")
                     summed_update = [np.zeros_like(layer) for layer in self.global_model_params]
@@ -113,8 +113,8 @@ class Aggregator:
         else:
             noisy_sum = summed_update
 
-        # 3. Average the (potentially noisy) sum
-        average_update = [layer_sum / num_selected_clients for layer_sum in noisy_sum]
+        # 3. Sample-weighted average
+        average_update = [layer_sum / total_samples for layer_sum in noisy_sum]
 
         # 4. Update Global Model: w_{t+1} = w_t + average_update
         for i in range(len(self.global_model_params)):
