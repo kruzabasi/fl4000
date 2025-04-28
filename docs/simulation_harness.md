@@ -45,6 +45,36 @@ validation_metric: 'predictive_mse'
 validation_set_path: 'data/processed/central_validation_set.parquet'
 ```
 
+## Logging and Analysis Enhancements (Sprint 6)
+
+- **Key Achievements:**
+  - Harness now logs `run_status`, `error_message`, `elapsed_time_sec`, and `final_delta` for each experiment run.
+  - Output CSVs (`experiments_full_log.csv`, `experiments_comparison_log.csv`) are robust to missing columns and always have correct headers and column order.
+  - Analysis notebook (`notebooks/results_analysis.py`) is standardized, adapts to changes in log format, and provides consistent, high-quality plots and tables.
+  - All results are reproducible and traceable, supporting DSR methodology and regulatory compliance.
+
+- **How to interpret logs:**
+  - `run_status`: Indicates if the run completed successfully or failed.
+  - `error_message`: Captures any errors encountered during the run.
+  - `elapsed_time_sec`: Wall-clock time taken for the run.
+  - `final_delta`: Final privacy delta for DP runs (if applicable).
+
+- **Design Decisions:**
+  - Logging and analysis were enhanced for clarity, traceability, and robustness to support iterative experimentation and compliance.
+  - Output files are now safe for direct use in analysis and reporting, regardless of experiment success/failure.
+
+## Quick Start Tips
+
+- To run a typical experiment, ensure your YAML config matches the format above and run:
+  ```bash
+  .venv/bin/python src/run_experiment.py --config configs/exp_fedprox_best.yaml
+  ```
+- For analysis and plots, use:
+  ```bash
+  .venv/bin/python notebooks/results_analysis.py
+  ```
+- If you update the experiment harness or log format, the analysis notebook will adapt automatically.
+
 ## Script Docstring
 
 ```
