@@ -34,29 +34,34 @@ class PlaceholderLinearModel:
              # Return zero arrays with correct shapes if not fitted
              # coef_ shape: (1, n_features) for regression, but SGDRegressor stores as (n_features,)
              # intercept_ shape: (1,)
-             return [np.zeros(self.n_features), np.zeros(1)]
+             return [np.zeros((1, self.n_features)), np.zeros(1)]
 
-        coef = self._model.coef_.copy().flatten() # Ensure 1D array
+        coef = self._model.coef_.copy().reshape(1, -1) # Ensure 2D shape (1, n_features)
         intercept = self._model.intercept_.copy()
+        if intercept.shape == ():
+            intercept = np.array([intercept])
         return [coef, intercept]
 
     def set_parameters(self, parameters: List[np.ndarray]) -> None:
         """Sets the model parameters."""
         if len(parameters) == 2:
-            coef = parameters[0].flatten() # Ensure 1D
+            coef = parameters[0]
             intercept = parameters[1]
 
-            if coef.shape != (self.n_features,):
-                 raise ValueError(f"Coefficient shape mismatch: Expected ({self.n_features},), got {coef.shape}")
-            if intercept.shape != (1,):
-                 # Allow scalar intercept to be set
-                 if np.isscalar(intercept) or intercept.shape == ():
-                     intercept = np.array([intercept])
-                 elif intercept.shape != (1,):
-                     raise ValueError(f"Intercept shape mismatch: Expected (1,), got {intercept.shape}")
+            # Ensure coef shape is (1, n_features)
+            if coef.shape == (self.n_features,):
+                coef = coef.reshape(1, -1)
+            elif coef.shape == (1, self.n_features):
+                pass
+            else:
+                raise ValueError(f"Coefficient shape mismatch: Expected (1, {self.n_features}), got {coef.shape}")
+            # Ensure intercept shape is (1,)
+            if intercept.shape == ():
+                intercept = np.array([intercept])
+            elif intercept.shape != (1,):
+                raise ValueError(f"Intercept shape mismatch: Expected (1,), got {intercept.shape}")
 
-
-            self._model.coef_ = coef
+            self._model.coef_ = coef.flatten()
             self._model.intercept_ = intercept
             self._is_fitted = True # Mark as 'fitted' once parameters are set
         else:

@@ -19,6 +19,16 @@ except ImportError:
     optimize_portfolio = None
     HAS_PYPFOpt = False
 
+# --- Canonical FTSE 100 feature list (must match everywhere) ---
+CANONICAL_FEATURES = [
+    'adjusted_close', 'close', 'dividend_amount', 'high', 'low', 'open', 'split_coefficient',
+    'volume', 'sma_5', 'sma_20', 'sma_60', 'volatility_20', 'day_of_week', 'month', 'quarter',
+    'log_return_lag_1', 'log_return_lag_2', 'log_return_lag_3', 'log_return_lag_5', 'log_return_lag_10',
+    'volume_lag_1', 'volume_lag_2', 'volume_lag_3', 'volume_lag_5', 'volume_lag_10',
+    'adjusted_close_lag_1', 'adjusted_close_lag_2', 'adjusted_close_lag_3', 'adjusted_close_lag_5',
+    'adjusted_close_lag_10', 'rsi', 'macd', 'macd_signal', 'macd_diff', 'obv'
+]
+
 class Client:
     """Represents a single client in the Federated Learning simulation."""
 
@@ -42,35 +52,78 @@ class Client:
         self.symbols: List[str] = []
         self.num_samples: int = 0
         self.random_seed = random_seed
+        self.scaler = None
         if self.random_seed is not None:
             np.random.seed(self.random_seed)
         self.initial_round_params: Optional[ModelParams] = None
         self.load_data()
+        # --- NEW: Ensure model is initialized on real data for parameter transfer robustness ---
+        if self.X_train is not None and self.y_train is not None and self.num_samples > 0:
+            try:
+                # Fit on a small batch (or all data if small) to initialize MultiOutputRegressor estimators
+                batch_size = min(10, self.X_train.shape[0])
+                self.local_model.fit(self.X_train[:batch_size], self.y_train[:batch_size])
+                logging.info(f"Client {self.client_id}: Local model initialized on real data batch for parameter transfer consistency.")
+            except Exception as e:
+                logging.error(f"Client {self.client_id}: Error during initial model fit for parameter transfer: {e}")
 
     def load_data(self) -> None:
         """Loads data, prepares features (X) and multi-output target (y)."""
         logging.debug(f"Client {self.client_id}: Loading data from {self.data_path}...")
         try:
             df = pd.read_parquet(self.data_path)
-            df = df.sort_index() # Ensure time order
+            # Deduplicate on ['symbol', 'timestamp'] if possible
+            if 'symbol' in df.columns and 'timestamp' in df.columns:
+                before = len(df)
+                df = df.drop_duplicates(subset=['symbol', 'timestamp'])
+                after = len(df)
+                n_dupes = before - after
+                if n_dupes > 0:
+                    logging.warning(f"Client {self.client_id}: Dropped {n_dupes} duplicate rows based on ['symbol', 'timestamp'].")
+                # Set MultiIndex for uniqueness
+                df = df.set_index(['symbol', 'timestamp'])
+                df = df.sort_index()
+            else:
+                df = df.sort_index() # Ensure time order
+
+            # Diagnostic logging for index uniqueness
+            if not df.index.is_unique:
+                logging.error(f"Client {self.client_id}: Duplicate index values before processing: {df.index[df.index.duplicated()].unique()}")
+                logging.debug(f"Client {self.client_id}: Head of duplicated index rows:\n{df.loc[df.index.duplicated()].head()}")
+                df = df.reset_index(drop=True)
+                logging.warning(f"Client {self.client_id}: Index reset to remove duplicates.")
+            else:
+                logging.debug(f"Client {self.client_id}: Index is unique before processing.")
 
             # Target: T+1 log return, pivoted to be multi-output (n_samples, n_assets)
             target_col = 'target_log_return'
-            df[target_col] = df.groupby('symbol')['log_return'].shift(-1)
-            df_pivot_target = df.pivot(columns='symbol', values=target_col)
+            # Use index for symbol and timestamp
+            if isinstance(df.index, pd.MultiIndex):
+                df[target_col] = df.groupby(level='symbol')['log_return'].shift(-1)
+                df_pivot_target = df.reset_index().pivot(columns='symbol', values=target_col)
+            else:
+                df[target_col] = df.groupby('symbol')['log_return'].shift(-1)
+                df_pivot_target = df.pivot(columns='symbol', values=target_col)
 
-            # Features: Use appropriate lags relative to the *prediction* time
-            feature_cols = [col for col in df.columns if col not in ['symbol', 'log_return', target_col, 'adjusted_close', 'close', 'open', 'high', 'low', 'gics_sector']]
-            numeric_feature_cols = df[feature_cols].select_dtypes(include=np.number).columns.tolist()
-
+            # --- Canonical feature enforcement for training ---
+            missing_features = [f for f in CANONICAL_FEATURES if f not in df.columns]
+            if missing_features:
+                raise ValueError(f"Client {self.client_id}: Missing canonical features: {missing_features}")
+            X = df[CANONICAL_FEATURES]
             df.dropna(subset=[target_col], inplace=True) # Drop last day
-            X = df[numeric_feature_cols]
             y = df[target_col]
 
             # Align X and y by index
             common_index = X.index.intersection(y.index)
             self.X_train = X.loc[common_index].to_numpy()
             self.y_train = y.loc[common_index].to_numpy()
+            # Ensure y_train is always 2D for multi-output regression
+            if self.y_train.ndim == 1:
+                self.y_train = self.y_train.reshape(-1, 1)
+
+            # Feature standardization (fit scaler on X_train)
+            self.scaler = StandardScaler()
+            self.X_train = self.scaler.fit_transform(self.X_train)
 
             self.num_samples = len(self.X_train)
             logging.info(f"Client {self.client_id}: Loaded data. Train shape X: {self.X_train.shape}, y: {self.y_train.shape}")
@@ -103,7 +156,7 @@ class Client:
         try:
             self.local_model.set_parameters(parameters)
         except Exception as e:
-             logging.error(f"Client {self.client_id}: Error setting parameters - {e}")
+            logging.error(f"Client {self.client_id}: Error setting parameters - {e}")
 
     def train(self, global_parameters_t: ModelParams, config: Dict[str, Any]) -> Dict[str, float]:
         """ Performs local training using the predictive model and FedProx. """
@@ -116,18 +169,16 @@ class Client:
 
         if self.X_train is None or self.y_train is None or self.num_samples == 0:
             logging.warning(f"Client {self.client_id}: No training data. Skipping.")
-            return {'loss': float('inf')}
+            return {'final_loss': float('inf')}
 
-        # Set local model to w^t
         self.set_parameters(self.initial_round_params)
 
-        logging.debug(f"Client {self.client_id}: Starting local training...")
         metrics = {}
         try:
             self.local_model.fit(self.X_train, self.y_train)
             final_loss = self.local_model.calculate_loss(self.X_train, self.y_train)
             metrics['final_loss'] = final_loss
-            logging.debug(f"Client {self.client_id}: Training complete (direct fit). Loss: {final_loss:.6f}")
+            logging.info(f"Client {self.client_id}: Training complete (direct fit). Loss: {final_loss:.6f}")
         except Exception as e:
             logging.error(f"Client {self.client_id}: Error during local model fit: {e}")
             metrics['final_loss'] = float('inf')
@@ -197,6 +248,10 @@ class Client:
                  if len(current_features) > 1:
                       logging.warning("Predicting based on multiple feature rows, using last row.")
                       current_features = current_features[-1].reshape(1, -1)
+
+            # Scale features using stored scaler
+            if self.scaler is not None:
+                current_features = self.scaler.transform(current_features)
 
             predicted_returns_array = self.local_model.predict(current_features) # Shape (1, n_outputs)
             predicted_returns = predicted_returns_array[0] # Get predictions for the single input timestamp

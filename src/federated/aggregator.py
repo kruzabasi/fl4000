@@ -76,6 +76,9 @@ class Aggregator:
 
         logging.info(f"Round {self.current_round}: Aggregating clipped updates from {num_selected_clients} clients (Total samples: {total_samples}).")
 
+        # Diagnostic: log pre-aggregation global param stats
+        pre_params = [p.copy() for p in self.global_model_params]
+
         # 1. Sum Clipped Updates
         summed_update: ModelParams = [np.zeros_like(layer) for layer in self.global_model_params]
         for update_params, _ in client_updates:
@@ -121,4 +124,12 @@ class Aggregator:
                 logging.error(f"Shape mismatch during final model update! Layer {i}. Skipping layer update.")
 
         logging.debug(f"Round {self.current_round}: Global model updated.")
+        # Diagnostic: log post-aggregation global param stats
+        for i, (pre, post) in enumerate(zip(pre_params, self.global_model_params)):
+            delta = np.linalg.norm(post - pre)
+            logging.info(f"Aggregator: Layer {i} param delta after aggregation: {delta:.6e}")
+            logging.info(
+                f"Aggregator: Layer {i} stats after aggregation: "
+                f"mean={np.mean(post):.6e}, std={np.std(post):.6e}, min={np.min(post):.6e}, max={np.max(post):.6e}"
+            )
         self.current_round += 1

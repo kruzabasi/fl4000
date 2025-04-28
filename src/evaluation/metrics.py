@@ -32,21 +32,50 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def calculate_portfolio_metrics(portfolio_returns: pd.Series,
-                                risk_free_rate: float = 0.01,
-                                required_metrics: Optional[List[str]] = None) -> Dict[str, float]:
+def calculate_predictive_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
     """
-    Calculates key portfolio performance metrics using quantstats.
+    Calculate predictive metrics: MSE, R2.
 
     Args:
-        portfolio_returns (pd.Series): Time series of portfolio daily log returns.
-        risk_free_rate (float): Annualized risk-free rate.
+        y_true (array-like): Ground truth values.
+        y_pred (array-like): Predicted values.
+    Returns:
+        dict: {'mse': float, 'r2': float}
+    """
+    metrics = {}
+    try:
+        # Ensure inputs are numpy arrays
+        y_true_np = np.asarray(y_true)
+        y_pred_np = np.asarray(y_pred)
+
+        if y_true_np.shape != y_pred_np.shape:
+             raise ValueError(f"Shape mismatch: y_true {y_true_np.shape}, y_pred {y_pred_np.shape}")
+        if len(y_true_np) == 0:
+             logging.warning("Empty arrays provided for predictive metrics.")
+             return {'mse': np.nan, 'r2': np.nan}
+
+        metrics['mse'] = mean_squared_error(y_true_np, y_pred_np)
+        metrics['r2'] = r2_score(y_true_np, y_pred_np)
+        logging.info(f"Calculated predictive metrics: MSE={metrics['mse']:.6f}, R2={metrics['r2']:.4f}")
+    except Exception as e:
+        logging.error(f"Error calculating predictive metrics: {e}")
+        metrics['mse'] = np.nan
+        metrics['r2'] = np.nan
+    return metrics
+
+
+def calculate_portfolio_metrics(portfolio_returns: pd.Series, risk_free_rate: float = 0.01, required_metrics: Optional[List[str]] = None) -> Dict[str, float]:
+    """
+    Calculate portfolio evaluation metrics: Sharpe, Max Drawdown, VaR, CVaR.
+
+    Args:
+        portfolio_returns (array-like): Portfolio returns.
+        risk_free_rate (float): Risk-free rate for Sharpe ratio.
         required_metrics (Optional[List[str]]): Specific metrics to calculate
                                                 (e.g., ['sharpe', 'max_drawdown', 'var_95', 'var_99', 'cvar_95']).
                                                 If None, calculates all listed default metrics.
-
     Returns:
-        Dict[str, float]: Dictionary containing calculated metric values.
+        dict: {'sharpe': float, 'max_drawdown': float, 'var_95': float, 'var_99': float, 'cvar_95': float}
     """
     metrics = {}
     if not HAS_QUANTSTATS:
@@ -100,51 +129,16 @@ def calculate_portfolio_metrics(portfolio_returns: pd.Series,
     return metrics
 
 
-def calculate_predictive_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-    """
-    Calculates predictive performance metrics (MSE, R2).
-
-    Args:
-        y_true (np.ndarray): Array of true target values.
-        y_pred (np.ndarray): Array of predicted values.
-
-    Returns:
-        Dict[str, float]: Dictionary containing 'mse' and 'r2'.
-    """
-    metrics = {}
-    try:
-        # Ensure inputs are numpy arrays
-        y_true_np = np.asarray(y_true)
-        y_pred_np = np.asarray(y_pred)
-
-        if y_true_np.shape != y_pred_np.shape:
-             raise ValueError(f"Shape mismatch: y_true {y_true_np.shape}, y_pred {y_pred_np.shape}")
-        if len(y_true_np) == 0:
-             logging.warning("Empty arrays provided for predictive metrics.")
-             return {'mse': np.nan, 'r2': np.nan}
-
-        metrics['mse'] = mean_squared_error(y_true_np, y_pred_np)
-        metrics['r2'] = r2_score(y_true_np, y_pred_np)
-        logging.info(f"Calculated predictive metrics: MSE={metrics['mse']:.6f}, R2={metrics['r2']:.4f}")
-    except Exception as e:
-        logging.error(f"Error calculating predictive metrics: {e}")
-        metrics['mse'] = np.nan
-        metrics['r2'] = np.nan
-    return metrics
-
-
 def calculate_communication_cost(update_size_bytes: float, clients_per_round: int, num_rounds: int) -> Dict[str, float]:
     """
-    Estimates total communication cost based on update size and rounds.
+    Calculate total communication cost in MB.
 
     Args:
-        update_size_bytes (float): Estimated size of a single client update in bytes.
-                                   (Need to estimate based on model size/sparsity/quantization).
-        clients_per_round (int): Number of clients participating per round.
-        num_rounds (int): Total number of communication rounds.
-
+        update_size_bytes (int): Size of one update in bytes.
+        clients_per_round (int): Number of clients per round.
+        num_rounds (int): Number of rounds.
     Returns:
-        Dict[str, float]: Dictionary containing 'total_MB_uploaded' and 'num_rounds'.
+        dict: {'total_MB_uploaded': float, 'num_rounds': float}
     """
     # Simplistic model: assumes only client->server upload cost dominates
     # Does not account for model broadcast size (server->client) or ACKs.
@@ -158,14 +152,13 @@ def calculate_communication_cost(update_size_bytes: float, clients_per_round: in
 
 def get_privacy_cost(accountant: Optional[Any], target_delta: float) -> Dict[str, float]:
     """
-    Gets the cumulative privacy cost (epsilon) from the accountant for a target delta.
+    Compute (epsilon, delta) for DP accounting.
 
     Args:
         accountant: The dp-accounting object used during simulation.
         target_delta (float): The target delta for which to calculate epsilon.
-
     Returns:
-        Dict[str, float]: Dictionary containing 'epsilon' and 'delta'.
+        dict: {'epsilon': float, 'delta': float}
     """
     if accountant is None or PrivacyAccountant is None:
         logging.warning("Privacy accountant not available. Cannot report privacy cost.")

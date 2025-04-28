@@ -59,18 +59,9 @@ class PortfolioPredictiveModel:
         if intercepts.shape != (self.n_outputs,):
              raise ValueError(f"Intercept shape mismatch: Expected {(self.n_outputs,)}, got {intercepts.shape}")
 
-        # Ensure estimators list exists and has the right length
+        # --- UPDATED: Remove dummy fit; require model to be fitted on real data first ---
         if not hasattr(self._model, 'estimators_') or len(self._model.estimators_) != self.n_outputs:
-             # Need to fit briefly to create estimators if setting params before first fit
-             # This is a workaround for sklearn's MultiOutputRegressor structure
-             logging.warning("Model not fitted yet. Fitting with dummy data to initialize estimators before setting parameters.")
-             dummy_X = np.zeros((1, self.n_features))
-             dummy_y = np.zeros((1, self.n_outputs))
-             try:
-                 self._model.fit(dummy_X, dummy_y)
-             except Exception as e:
-                 logging.error(f"Dummy fit failed: {e}")
-                 raise
+            raise RuntimeError("Model must be fitted on real data before setting parameters. Please fit the model first.")
 
         # Set parameters for each internal estimator
         for i, estimator in enumerate(self._model.estimators_):
@@ -78,7 +69,7 @@ class PortfolioPredictiveModel:
             estimator.intercept_ = intercepts[i]
 
         self._is_fitted = True
-        logging.debug("Model parameters set.")
+        logging.debug(f"Model parameters set. Coef shape: {coefs.shape}, Intercept shape: {intercepts.shape}")
 
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:

@@ -45,6 +45,18 @@ RANDOM_SEED = 42 # For reproducibility
 
 np.random.seed(RANDOM_SEED)
 
+CANONICAL_FEATURES = [
+    'adjusted_close', 'close', 'dividend_amount', 'high', 'low', 'open', 'split_coefficient',
+    'volume', 'log_return', 'sma_5', 'sma_20', 'sma_60', 'volatility_20', 'day_of_week', 'month',
+    'quarter', 'log_return_lag_1', 'log_return_lag_2', 'log_return_lag_3', 'log_return_lag_5',
+    'log_return_lag_10', 'volume_lag_1', 'volume_lag_2', 'volume_lag_3', 'volume_lag_5', 'volume_lag_10',
+    'adjusted_close_lag_1', 'adjusted_close_lag_2', 'adjusted_close_lag_3', 'adjusted_close_lag_5',
+    'adjusted_close_lag_10', 'rsi', 'macd', 'macd_signal', 'macd_diff', 'obv'
+]
+TARGET_COLUMN = 'log_return'
+ID_COLS = ['symbol', 'timestamp']
+ALL_CANONICAL_COLS = ID_COLS + CANONICAL_FEATURES
+
 def add_sector_info(df: pd.DataFrame, symbol_sector_map: Dict[str, str]) -> pd.DataFrame:
     """Adds GICS sector information based on the symbol."""
     logging.info("Mapping symbols to GICS sectors...")
@@ -187,7 +199,7 @@ def partition_data_non_iid(df: pd.DataFrame, num_clients: int, alpha: float) -> 
 
 
 def save_client_data(client_dfs: Dict[int, pd.DataFrame], base_dir: str) -> None:
-    """Saves each client's DataFrame to a dedicated directory."""
+    """Saves each client's DataFrame to a dedicated directory, enforcing canonical features."""
     logging.info(f"Saving partitioned data to base directory: {base_dir}")
     for client_id, client_df in client_dfs.items():
         client_dir = os.path.join(base_dir, f"client_{client_id}")
@@ -195,13 +207,31 @@ def save_client_data(client_dfs: Dict[int, pd.DataFrame], base_dir: str) -> None
         output_path = os.path.join(client_dir, "client_data.parquet")
         try:
             if not client_df.empty:
+                before = len(client_df)
+                # Deduplicate on ['symbol', 'timestamp'] if possible
+                if 'symbol' in client_df.columns and 'timestamp' in client_df.columns:
+                    client_df = client_df.drop_duplicates(subset=['symbol', 'timestamp'])
+                    after = len(client_df)
+                    n_dupes = before - after
+                    if n_dupes > 0:
+                        logging.warning(f"[SRC CLEAN] Client {client_id}: Dropped {n_dupes} duplicate rows before saving.")
+
+                # Enforce canonical features
+                missing_features = [col for col in ALL_CANONICAL_COLS if col not in client_df.columns]
+                if missing_features:
+                    logging.error(f"Client {client_id} is missing canonical columns: {missing_features}")
+                    raise ValueError(f"Client {client_id} missing canonical columns: {missing_features}")
+
+                # Select only canonical columns (in order)
+                client_df = client_df[ALL_CANONICAL_COLS]
                 client_df.to_parquet(output_path)
                 logging.debug(f"Saved data for client {client_id} to {output_path}")
             else:
-                 logging.warning(f"Skipping save for client {client_id} due to empty DataFrame.")
+                logging.warning(f"Skipping save for client {client_id} due to empty DataFrame.")
         except Exception as e:
             logging.error(f"Failed to save data for client {client_id}: {e}")
     logging.info("Finished saving client data.")
+
 
 def main():
     """Main function to run the partitioning process."""

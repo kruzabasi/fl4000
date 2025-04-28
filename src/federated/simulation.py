@@ -19,14 +19,30 @@ except ImportError:
 
 # --- DP-accounting import fix ---
 try:
-    from dp_accounting.accountant import GaussianAccountant # Correct import for dp-accounting >=0.4.4
-    from dp_accounting.dp_event import DpEvent, SampledDpEvent, GaussianDpEvent
+    from dp_accounting.dp_event import GaussianDpEvent
+    from dp_accounting.privacy_accountant import PrivacyAccountant
     ACCOUNTING_LIB_AVAILABLE = True
-except ImportError:
-    logging.warning("dp-accounting library not found. Cannot perform rigorous privacy accounting.")
+except ImportError as e:
+    logging.warning(f"dp-accounting library not found or incomplete. ImportError: {e}")
+    ACCOUNTING_LIB_AVAILABLE = False
+except Exception as e:
+    logging.error(f"Unexpected error importing dp-accounting: {e}")
     ACCOUNTING_LIB_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- Canonical FTSE 100 feature list ---
+CANONICAL_FEATURES = [
+    'adjusted_close', 'close', 'dividend_amount', 'high', 'low', 'open', 'split_coefficient',
+    'volume', 'sma_5', 'sma_20', 'sma_60', 'volatility_20', 'day_of_week', 'month', 'quarter',
+    'log_return_lag_1', 'log_return_lag_2', 'log_return_lag_3', 'log_return_lag_5', 'log_return_lag_10',
+    'volume_lag_1', 'volume_lag_2', 'volume_lag_3', 'volume_lag_5', 'volume_lag_10',
+    'adjusted_close_lag_1', 'adjusted_close_lag_2', 'adjusted_close_lag_3', 'adjusted_close_lag_5',
+    'adjusted_close_lag_10', 'rsi', 'macd', 'macd_signal', 'macd_diff', 'obv'
+]
+ID_COLS = ['symbol', 'timestamp']
+TARGET_COL = 'log_return'
+ALL_CANONICAL_COLS = ID_COLS + CANONICAL_FEATURES + [TARGET_COL]
 
 # --- Simulation Configuration ---
 # These could also be loaded from a YAML/JSON config file
@@ -39,209 +55,195 @@ LEARNING_RATE = 0.01 # eta
 MU_PROX = 0.1 # FedProx mu parameter
 
 # --- Main Simulation Function ---
-def run_simulation():
-    """Runs the Federated Learning simulation using FedProx."""
-    logging.info("--- Starting FedProx Simulation ---")
+def run_fl_simulation(fl_params, dp_params, model_params, non_iid_params, seed, experiment_id=None, results_dir=None):
+    """Runs the Federated Learning simulation using FedProx/FedAvg/DP with passed config dicts."""
+    # Use passed config dicts instead of globals
+    # Set up config, logging, and parameters
+    import config as global_config
+    if results_dir is None:
+        results_dir = global_config.RESULTS_DIR
+    random.seed(seed)
+    np.random.seed(seed)
 
-    # 1. Load Data Info & Determine Feature Size (needed for model init)
-    # Requires partitioned data to exist from Sprint 2
-    # Load one client's data just to get feature dimension
+    # 1. Load Data Info & Determine Feature Size
     try:
-         client0_path = os.path.join(config.FEDERATED_DATA_DIR, "client_0", "client_data.parquet")
-         temp_df = pd.read_parquet(client0_path)
-         # Infer feature columns (excluding metadata, target) - MUST MATCH BASELINE
-         feature_cols = [col for col in temp_df.columns if col not in ['symbol', 'log_return', 'target_log_return', 'adjusted_close', 'close', 'open', 'high', 'low', 'gics_sector']]
-         numeric_feature_cols = temp_df[feature_cols].select_dtypes(include=np.number).columns.tolist()
-         n_features = len(numeric_feature_cols)
-         if n_features == 0:
-              raise ValueError("No numeric features found in client data.")
-         logging.info(f"Determined number of features: {n_features}")
+        client0_path = os.path.join(global_config.FEDERATED_DATA_DIR, "client_0", "client_data.parquet")
+        temp_df = pd.read_parquet(client0_path)
+        # --- Canonical feature enforcement ---
+        missing_features = [f for f in CANONICAL_FEATURES if f not in temp_df.columns]
+        if missing_features:
+            raise ValueError(f"Client 0 is missing canonical features: {missing_features}")
+        # Use canonical feature order
+        X0 = temp_df[CANONICAL_FEATURES]
+        n_features = X0.shape[1]
+        if n_features == 0:
+            raise ValueError("No numeric features found in client data.")
     except Exception as e:
-        logging.error(f"Could not load sample client data to determine feature size: {e}")
-        return
+        logging.error(f"Failed to load client 0 data or determine feature size: {e}")
+        return None
 
-    # 2. Initialize Model Template and Aggregator
-    model_template = PlaceholderLinearModel(n_features=n_features, random_state=config.RANDOM_SEED)
-    # Assuming client IDs are 'client_0', 'client_1', ... 'client_39'
-    all_client_ids = [f"client_{i}" for i in range(config.NUM_CLIENTS)]
-    aggregator = Aggregator(model_template, num_clients=config.NUM_CLIENTS, client_ids=all_client_ids)
+    # 2. Model Template and Aggregator
+    from models.placeholder import PlaceholderLinearModel
+    model_template = PlaceholderLinearModel(n_features=n_features, random_state=seed)
+    all_client_ids = [f"client_{i}" for i in range(global_config.NUM_CLIENTS)]
+    from federated.aggregator import Aggregator
+    aggregator = Aggregator(model_template, num_clients=global_config.NUM_CLIENTS, client_ids=all_client_ids)
 
     # 3. Initialize Clients
-    clients: List[Client] = []
-    # Infer n_outputs from data
-    n_outputs = None
+    from federated.client import Client
+    clients = []
+    n_outputs = 1
     try:
-        # Try to infer n_outputs from the temp_df loaded above
         target_col = 'target_log_return'
         if target_col in temp_df.columns:
-            # If target is a single column, n_outputs = 1
-            n_outputs = 1
-            # If target is a multi-output (e.g., pivoted), set accordingly
-            # Uncomment and adjust if your pipeline pivots targets by symbol
-            # n_outputs = temp_df.pivot(columns='symbol', values=target_col).shape[1]
-        else:
             n_outputs = 1
     except Exception as e:
         logging.warning(f"Could not infer n_outputs from data: {e}. Defaulting to 1.")
         n_outputs = 1
-
-    for i in range(config.NUM_CLIENTS):
+    for i in range(global_config.NUM_CLIENTS):
         client_id = all_client_ids[i]
-        data_path = os.path.join(config.FEDERATED_DATA_DIR, client_id, "client_data.parquet")
+        data_path = os.path.join(global_config.FEDERATED_DATA_DIR, client_id, "client_data.parquet")
         if os.path.exists(data_path):
-            client = Client(client_id, n_features, n_outputs, data_path, random_seed=config.RANDOM_SEED + i)
-            # Only add client if they successfully loaded data
+            client = Client(client_id, n_features, n_outputs, data_path, random_seed=seed + i)
             if client.num_samples > 0:
-                 clients.append(client)
-            else:
-                 logging.warning(f"Skipping client {client_id} due to data loading issues.")
-        else:
-            logging.warning(f"Data path not found for client {client_id}: {data_path}")
-
+                clients.append(client)
+        # else skip
     if not clients:
-         logging.error("No clients were successfully initialized. Exiting.")
-         return
-
+        logging.error("No clients were successfully initialized. Exiting.")
+        return None
     num_active_clients = len(clients)
-    logging.info(f"Initialized {num_active_clients} active clients.")
 
-    # --- DP Configuration ---
-    DP_PARAMS = {
-        'clip_norm': 1.0, # Example C_clip - TUNE THIS
-        'target_epsilon': 2.0, # Example total epsilon
-        'target_delta': 1e-5, # Example target delta (often related to 1/num_total_samples)
-        'total_rounds': TOTAL_ROUNDS,
-        # Noise multiplier will be calculated using accountant if library available
-    }
-    noise_multiplier = None # Placeholder
+    # DP/FL/Training config
+    DP_PARAMS = dp_params.copy() if dp_params else None
+    training_config = fl_params.copy()
+    training_config['mu_prox'] = model_params.get('mu_prox', 0.0)
 
-    # --- Initialize Privacy Accountant ---
+    # Privacy Accountant
     accountant = None
-    num_total_clients_for_dp = config.NUM_CLIENTS  # Ensure this is always defined
-    if ACCOUNTING_LIB_AVAILABLE:
-        accountant = GaussianAccountant(max_compositions=TOTAL_ROUNDS * 2)
-        sampling_probability = min(1.0, CLIENTS_PER_ROUND / num_total_clients_for_dp)
-        if sampling_probability > 0:
-            try:
-                noise_multiplier = 2.0 # <<< EXAMPLE - REPLACE WITH ACTUAL CALCULATION using accountant
-                logging.info(f"Using PRE-CALCULATED noise multiplier: {noise_multiplier:.4f} (Replace with proper calculation)")
-                DP_PARAMS['noise_multiplier'] = noise_multiplier
-            except Exception as e:
-                logging.error(f"Could not determine noise multiplier using dp-accounting: {e}. DP disabled.")
-                DP_PARAMS = None
-        else:
-            logging.warning("Client sampling probability is zero. DP noise calculation skipped.")
-            DP_PARAMS = None
+    if DP_PARAMS and ACCOUNTING_LIB_AVAILABLE:
+        try:
+            from dp_accounting.accountant import RdpAccountant
+            accountant = RdpAccountant()
+        except Exception as e:
+            logging.error(f"Failed to instantiate RdpAccountant from dp_accounting: {e}")
+            accountant = None
+    # Set noise_multiplier if not provided
+    if DP_PARAMS and 'noise_multiplier' not in DP_PARAMS:
+        DP_PARAMS['noise_multiplier'] = 2.0 # Placeholder
 
-    # 4. Federation Loop
-    training_config = {
-        'local_epochs': LOCAL_EPOCHS,
-        'batch_size': BATCH_SIZE,
-        'learning_rate': LEARNING_RATE,
-        'mu_prox': MU_PROX
-    }
-    # Determine actual number of clients to select per round
-    num_select = max(1, int(CLIENTS_PER_ROUND)) # Ensure at least 1
-    # Or use fraction: num_select = max(1, int(CLIENT_FRACTION * num_active_clients))
+    num_select = max(1, int(fl_params['clients_per_round']))
+    history = {'round': [], 'selected_clients': [], 'avg_client_loss': []}
 
-    history = {'round': [], 'selected_clients': [], 'avg_client_loss': []} # Basic history tracking
-
-    for t in range(TOTAL_ROUNDS):
-        logging.info(f"--- Round {t+1}/{TOTAL_ROUNDS} ---")
-
-        # Select clients for this round (using indices relative to the 'clients' list)
-        # Need to adjust aggregator's selection if number of active clients differs
-        # Simple approach: select from the active clients
+    for t in range(fl_params['total_rounds']):
         available_indices = list(range(num_active_clients))
         selected_indices = random.sample(available_indices, min(num_select, num_active_clients))
-        num_selected_clients = len(selected_indices)
-        sampling_probability_this_round = min(1.0, num_selected_clients / num_total_clients_for_dp)
         selected_client_ids = [clients[i].client_id for i in selected_indices]
-        logging.info(f"Selected {len(selected_indices)} clients: {selected_client_ids}")
         history['round'].append(t+1)
         history['selected_clients'].append(selected_client_ids)
-
-
-        # Get current global model
         global_params_t = aggregator.get_global_parameters()
         client_updates_this_round = []
         round_losses = []
-
-        # Train selected clients
         for client_idx in selected_indices:
             client = clients[client_idx]
-            logging.debug(f"Training client {client.client_id}...")
-
-            # Set client model to global state (make deep copy for prox term)
             initial_params_for_client = copy.deepcopy(global_params_t)
             client.set_parameters(initial_params_for_client)
-
-            # Perform local training with FedProx logic
             train_metrics = client.train(initial_params_for_client, training_config)
             round_losses.append(train_metrics.get('final_loss', float('inf')))
-
-            # Get update (local_params - initial_params_for_client)
             update, num_samples = client.get_update(DP_PARAMS['clip_norm'] if DP_PARAMS else None)
-
             if update is not None and num_samples > 0:
                 client_updates_this_round.append((update, num_samples))
-            else:
-                 logging.warning(f"No update generated by client {client.client_id}")
-
-
-        # Aggregate updates at server, passing DP params
         if client_updates_this_round:
             aggregator.aggregate_updates(client_updates_this_round,
-                                        num_total_clients=num_total_clients_for_dp,
+                                        num_total_clients=global_config.NUM_CLIENTS,
                                         dp_params=DP_PARAMS)
-            # --- Compose Privacy Budget ---
-            if ACCOUNTING_LIB_AVAILABLE and accountant and DP_PARAMS and DP_PARAMS.get('noise_multiplier') and sampling_probability_this_round > 0:
+            # Compose privacy budget
+            if DP_PARAMS and ACCOUNTING_LIB_AVAILABLE and accountant and DP_PARAMS.get('noise_multiplier'):
                 try:
                     event = GaussianDpEvent(DP_PARAMS['noise_multiplier'])
-                    event = SampledDpEvent(sampling_probability_this_round, event)
                     accountant.compose(event, count=1)
-                    spent_epsilon, spent_delta = accountant.get_epsilon_and_delta(DP_PARAMS['target_delta'])
-                    logging.info(f"Privacy Check - Round {t+1}: Spent Epsilon={spent_epsilon:.4f} (Delta={spent_delta:.1E})")
                 except Exception as acc_e:
                     logging.error(f"Error during privacy accounting: {acc_e}")
             avg_loss = np.mean([loss for loss in round_losses if loss != float('inf')])
-            logging.info(f"Round {t+1} completed. Average client final loss: {avg_loss:.4f}")
             history['avg_client_loss'].append(avg_loss)
         else:
-             logging.warning(f"Round {t+1}: No updates to aggregate. Global model unchanged.")
-             history['avg_client_loss'].append(np.nan)
+            history['avg_client_loss'].append(np.nan)
 
-
-        # Optional: Periodic evaluation on a global validation set
-        # if (t + 1) % 5 == 0:
-        #     evaluate_global_model(aggregator.get_global_parameters(), global_val_data)
-
-    logging.info("--- Simulation Finished ---")
-
-    # Log final privacy spend
-    if ACCOUNTING_LIB_AVAILABLE and accountant and DP_PARAMS:
+    # Final privacy spend
+    final_epsilon, final_delta = None, None
+    if DP_PARAMS and ACCOUNTING_LIB_AVAILABLE and accountant:
         final_epsilon, final_delta = accountant.get_epsilon_and_delta(DP_PARAMS['target_delta'])
-        logging.info(f"--- Final Privacy Spend ({TOTAL_ROUNDS} rounds) ---")
-        logging.info(f"Epsilon: {final_epsilon:.4f}")
-        logging.info(f"Delta:   {final_delta:.1E}")
 
-    # Save history/results
-    history_df = pd.DataFrame(history)
-    history_path = os.path.join(config.RESULTS_DIR, 'fedprox_run_history.csv')
-    history_df.to_csv(history_path, index=False)
-    logging.info(f"Run history saved to {history_path}")
-
-    # Save final global model
-    final_model_params = aggregator.get_global_parameters()
-    model_save_path = os.path.join(config.RESULTS_DIR, 'fedprox_global_model.pkl')
-    try:
-        # Save as list of numpy arrays
+    # Save history and model if requested
+    if experiment_id:
+        history_df = pd.DataFrame(history)
+        os.makedirs(results_dir, exist_ok=True)
+        history_path = os.path.join(results_dir, f'{experiment_id}_run_history.csv')
+        history_df.to_csv(history_path, index=False)
+        final_model_params = aggregator.get_global_parameters()
+        model_save_path = os.path.join(results_dir, f'{experiment_id}_global_model.pkl')
         with open(model_save_path, 'wb') as f:
-             pickle.dump(final_model_params, f)
-        logging.info(f"Final global model parameters saved to {model_save_path}")
+            pickle.dump(final_model_params, f)
+    # Reconstruct model object with final parameters for downstream evaluation
+    from models.placeholder import PlaceholderLinearModel
+    global_model = PlaceholderLinearModel(n_features=n_features, random_state=seed)
+    global_model.set_parameters(aggregator.get_global_parameters())
+
+    # --- EVALUATE FINAL MODEL (DSR METHODOLOGY: Out-of-sample metrics) ---
+    metrics = {}
+    try:
+        # Use validation set for final evaluation (out-of-sample, as per DSR best practice)
+        val_path = getattr(global_config, 'CENTRAL_TEST_PATH', None)
+        if val_path is None:
+            val_path = os.path.join('data', 'processed', 'central_validation_set.parquet')
+        if os.path.exists(val_path):
+            logging.info(f"Evaluating final model on {val_path}")
+            df_val = pd.read_parquet(val_path)
+            # Ensure 'timestamp' is datetime and set as index for portfolio metrics
+            if 'timestamp' in df_val.columns:
+                df_val['timestamp'] = pd.to_datetime(df_val['timestamp'])
+                df_val = df_val.set_index('timestamp')
+            # Ensure canonical feature order and target
+            X_val = df_val[CANONICAL_FEATURES].to_numpy()
+            y_val = df_val[TARGET_COL].to_numpy()
+            # --- Apply same standardization as training ---
+            from sklearn.preprocessing import StandardScaler
+            # Load scaler fit on X_train from any client (all use same scaling logic)
+            scaler = None
+            for c in clients:
+                if hasattr(c, 'scaler') and c.scaler is not None:
+                    scaler = c.scaler
+                    break
+            if scaler is not None:
+                X_val = scaler.transform(X_val)
+            else:
+                logging.warning("No scaler found from clients; X_val not standardized!")
+            # Predictive metrics
+            from evaluation.metrics import calculate_predictive_metrics, calculate_portfolio_metrics
+            pred_metrics = calculate_predictive_metrics(y_val, global_model.predict(X_val))
+            # Portfolio metrics (using log returns)
+            # If y_pred is 2D, flatten
+            if hasattr(global_model.predict(X_val), 'ndim') and global_model.predict(X_val).ndim > 1:
+                y_pred = global_model.predict(X_val).ravel()
+            else:
+                y_pred = global_model.predict(X_val)
+            port_metrics = calculate_portfolio_metrics(pd.Series(y_pred, index=df_val.index), risk_free_rate=0.01)
+            metrics.update(pred_metrics)
+            metrics.update(port_metrics)
+        else:
+            logging.warning(f"Validation set not found at {val_path}. Skipping final evaluation metrics.")
     except Exception as e:
-        logging.error(f"Could not save final model: {e}")
+        logging.error(f"Error during final evaluation: {e}")
 
+    return {
+        'history': history,
+        'final_model_params': aggregator.get_global_parameters(),
+        'accountant': accountant,
+        'final_epsilon': final_epsilon,
+        'final_delta': final_delta,
+        'global_model': global_model,
+        'metrics': metrics
+    }
 
+# Keep legacy CLI
 if __name__ == "__main__":
     run_simulation()
