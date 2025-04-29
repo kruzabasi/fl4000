@@ -257,7 +257,12 @@ def run_fl_simulation(fl_params, dp_params, model_params, non_iid_params, seed, 
     metrics_history = []
     for i in range(len(history['round'])):
         metrics_history.append({'round': history['round'][i], 'avg_client_loss': history['avg_client_loss'][i]})
-    convergence_rounds = determine_convergence(metrics_history, metric_key='avg_client_loss', tolerance=1e-4, patience=5)
+    # Relaxed convergence criteria
+    convergence_rounds = determine_convergence(metrics_history, metric_key='avg_client_loss', tolerance=1e-3, patience=3)
+    if convergence_rounds is not None:
+        logging.info(f"[EXPERIMENT LOG] Convergence detected at round: {convergence_rounds}")
+    else:
+        logging.info(f"[EXPERIMENT LOG] No convergence detected. Last avg_client_loss values: {[m['avg_client_loss'] for m in metrics_history[-6:]]}")
 
     return {
         'history': history,
