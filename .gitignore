@@ -30,6 +30,8 @@ scripts/
 results/
 output/
 logs/
+configs/sensitivity/*
+!configs/sensitivity/template_sensitivity.yaml
 
 # Secrets
 .env

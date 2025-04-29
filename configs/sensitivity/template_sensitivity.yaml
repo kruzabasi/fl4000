@@ -1,24 +1,24 @@
-experiment_id: "FedProxDP_Best_20250428"
-random_seed: 123
+experiment_id: "SENSITIVITY_SWEEP_<PARAM>_<VALUE>_seed<SEED>"
+random_seed: <SEED>
 risk_free_rate: 0.01
 non_iid_params:
-  alpha: 0.5
+  alpha: <ALPHA>
 fl_params:
   total_rounds: 100
-  clients_per_round: 10
+  clients_per_round: <CLIENTS_PER_ROUND>
   local_epochs: 5
   batch_size: 64
   learning_rate: 0.1
 model_params:
   alpha: 1.0
-  mu_prox: 0.001
+  mu_prox: <MU_PROX>
 runs:
   fedprox_dp_run:
     model_type: "FedProxDP"
     dp_params:
       clip_norm: 0.5
       target_delta: 1e-5
-      noise_multiplier: 0.01
+      noise_multiplier: <NOISE_MULTIPLIER>
 features:
   - adjusted_close
   - close
@@ -60,14 +60,4 @@ target: log_return
 exclude_columns:
   - symbol
   - timestamp
-data:
-  train_path: "data/processed/central_train_set.parquet"
-  val_path: "data/processed/central_validation_set.parquet"
-  test_path: "data/processed/central_test_set.parquet"
-metrics:
-  - predictive_mse
-  - r2
-  - sharpe_ratio
-  - var
-  - communication_cost
-  - privacy_cost
+data_partition_path: <DATA_PARTITION_PATH>
