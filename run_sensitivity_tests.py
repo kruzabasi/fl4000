@@ -61,7 +61,7 @@ def fill_template(param, value, seed, baseline, data_partition_path, noise_multi
     config['fl_params']['local_epochs'] = baseline['E']
     config['fl_params']['batch_size'] = baseline['BATCH_SIZE']
     config['fl_params']['learning_rate'] = baseline['LR']
-    config['fl_params']['total_rounds'] = 2  # TEMP: limit to 2 rounds for debugging log output
+    config['fl_params']['total_rounds'] = 12 # baseline['ROUNDS']   TEMP: limit to 2 rounds for debugging log output
     config['model_params']['mu_prox'] = baseline['MU_PROX'] if param != 'mu_prox' else value
     config['runs']['fedprox_dp_run']['dp_params']['clip_norm'] = baseline['CLIP_NORM']
     # Ensure target_delta is always a float
@@ -199,3 +199,4 @@ if __name__ == "__main__":
     main()
 
 # time .venv/bin/python run_sensitivity_tests.py
+# Note: run experiment for a higher # of rounds per client as only 2 rounds have been robuslty validated
