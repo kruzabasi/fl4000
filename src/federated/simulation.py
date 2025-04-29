@@ -20,7 +20,7 @@ except ImportError:
 # --- DP-accounting import fix ---
 try:
     from dp_accounting.dp_event import GaussianDpEvent
-    from dp_accounting.privacy_accountant import PrivacyAccountant
+    from dp_accounting.rdp import RdpAccountant
     ACCOUNTING_LIB_AVAILABLE = True
 except ImportError as e:
     logging.warning(f"dp-accounting library not found or incomplete. ImportError: {e}")
@@ -122,10 +122,9 @@ def run_fl_simulation(fl_params, dp_params, model_params, non_iid_params, seed, 
     accountant = None
     if DP_PARAMS and ACCOUNTING_LIB_AVAILABLE:
         try:
-            from dp_accounting.accountant import RdpAccountant
             accountant = RdpAccountant()
         except Exception as e:
-            logging.error(f"Failed to instantiate RdpAccountant from dp_accounting: {e}")
+            logging.error(f"Failed to instantiate RdpAccountant: {e}")
             accountant = None
     # Set noise_multiplier if not provided
     if DP_PARAMS and 'noise_multiplier' not in DP_PARAMS:
@@ -171,7 +170,9 @@ def run_fl_simulation(fl_params, dp_params, model_params, non_iid_params, seed, 
     # Final privacy spend
     final_epsilon, final_delta = None, None
     if DP_PARAMS and ACCOUNTING_LIB_AVAILABLE and accountant:
-        final_epsilon, final_delta = accountant.get_epsilon_and_delta(DP_PARAMS['target_delta'])
+        # Compute ε for given δ threshold and then compute corresponding δ
+        final_epsilon = accountant.get_epsilon(DP_PARAMS['target_delta'])
+        final_delta = accountant.get_delta(final_epsilon)
 
     # Save history and model if requested
     if experiment_id:
@@ -234,6 +235,30 @@ def run_fl_simulation(fl_params, dp_params, model_params, non_iid_params, seed, 
     except Exception as e:
         logging.error(f"Error during final evaluation: {e}")
 
+    # --- Communication Cost Calculation ---
+    from evaluation.metrics import calculate_communication_cost
+    from typing import Any
+    # Estimate model update size (use aggregator global parameters as proxy)
+    model_params = aggregator.get_global_parameters()
+    update_size_bytes = 0
+    try:
+        # Use same estimation logic as in run_experiment.py
+        for p in model_params:
+            if hasattr(p, 'nbytes'):
+                update_size_bytes += p.nbytes
+    except Exception as e:
+        logging.warning(f"Could not estimate update size: {e}")
+    comm_cost = calculate_communication_cost(update_size_bytes, fl_params['clients_per_round'], fl_params['total_rounds'])
+    metric_communication_total_MB_uploaded = comm_cost['total_MB_uploaded']
+
+    # --- Convergence Rounds Calculation ---
+    from evaluation.metrics import determine_convergence
+    # Convert history to list of dicts for determine_convergence
+    metrics_history = []
+    for i in range(len(history['round'])):
+        metrics_history.append({'round': history['round'][i], 'avg_client_loss': history['avg_client_loss'][i]})
+    convergence_rounds = determine_convergence(metrics_history, metric_key='avg_client_loss', tolerance=1e-4, patience=5)
+
     return {
         'history': history,
         'final_model_params': aggregator.get_global_parameters(),
@@ -241,7 +266,9 @@ def run_fl_simulation(fl_params, dp_params, model_params, non_iid_params, seed, 
         'final_epsilon': final_epsilon,
         'final_delta': final_delta,
         'global_model': global_model,
-        'metrics': metrics
+        'metrics': metrics,
+        'metric_communication_total_MB_uploaded': metric_communication_total_MB_uploaded,
+        'convergence_rounds': convergence_rounds
     }
 
 def run_simulation():

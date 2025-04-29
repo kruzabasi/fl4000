@@ -12,6 +12,7 @@ from typing import Dict, Any, List # Added List for type hinting
 import datetime
 import traceback
 import time as time_module
+from filelock import FileLock
 
 # Project Modules (adjust paths/imports as necessary)
 try:
@@ -62,6 +63,27 @@ def estimate_update_size(model_params: List[np.ndarray]) -> float:
      return float(total_bytes)
 
 
+def append_to_master_log(row_dict, log_path):
+    lock_path = log_path + '.lock'
+    from pathlib import Path
+    import os
+    import pandas as pd
+    Path(os.path.dirname(log_path)).mkdir(parents=True, exist_ok=True)
+    with FileLock(lock_path):
+        # Check if file exists and if it is empty
+        write_header = False
+        if not os.path.exists(log_path):
+            write_header = True
+        else:
+            try:
+                if os.path.getsize(log_path) == 0:
+                    write_header = True
+            except Exception:
+                write_header = True
+        df = pd.DataFrame([row_dict])
+        df.to_csv(log_path, mode='a', header=write_header, index=False)
+
+
 def run_experiment(exp_config: Dict[str, Any]):
     """Runs a single experiment based on the configuration."""
     # Extract top-level config
@@ -72,7 +94,9 @@ def run_experiment(exp_config: Dict[str, Any]):
     fl_params = exp_config.get("fl_params", {})
     model_params = exp_config.get("model_params", {})
     runs = exp_config.get("runs", {})
-    results_dir = getattr(config, "RESULTS_DIR", "results")
+    results_dir = getattr(__import__('config'), 'RESULTS_DIR', 'data/results')
+    master_full_log = os.path.join(results_dir, 'experiments_full_log.csv')
+    master_comp_log = os.path.join(results_dir, 'experiments_comparison_log.csv')
 
     # Run each requested FL config (e.g., fedprox_dp_run, fedavg_run)
     for run_name, run_cfg in runs.items():
@@ -93,98 +117,43 @@ def run_experiment(exp_config: Dict[str, Any]):
                 model_params=this_model_params,
                 non_iid_params=non_iid_params,
                 seed=this_seed,
-                experiment_id=f"{experiment_id}_{run_name}",
-                results_dir=results_dir
+                experiment_id=experiment_id,
+                results_dir=os.path.join(results_dir, "FL")
             )
         except Exception as e:
             run_status = "failure"
             error_message = str(e)
-            logging.error(f"Experiment {experiment_id}_{run_name} failed: {error_message}")
-            traceback.print_exc()
+            logging.error(f"Experiment {experiment_id} failed: {e}")
         elapsed_time = time.time() - start_time
-        if sim_result is not None:
-            if sim_result.get('final_epsilon') is not None:
-                logging.info(f"{run_name}: Final epsilon={sim_result['final_epsilon']} delta={sim_result['final_delta']}")
-            logging.info(f"--- Experiment {experiment_id}_{run_name} Finished ---")
-            if 'metrics' in sim_result:
-                logging.info(f"Final Metrics: {sim_result['metrics']}")
-            else:
-                logging.info("No metrics found in simulation result.")
-        results_full_log_path = os.path.join(results_dir, 'experiments_full_log.csv')
-        flat_result = {}
-        flat_result.update(exp_config)
-        flat_result['experiment_id'] = f"{experiment_id}_{run_name}"
-        flat_result['model_type'] = this_model_params.get('model_type', 'unknown')
-        flat_result['run_status'] = run_status
-        flat_result['error_message'] = error_message
-        flat_result['elapsed_time_sec'] = elapsed_time
-        if sim_result is not None:
-            flat_result['final_epsilon'] = sim_result.get('final_epsilon', None)
-            flat_result['final_delta'] = sim_result.get('final_delta', None)
-            if 'metrics' in sim_result:
-                for metric_type, metrics_dict in sim_result['metrics'].items():
-                    if isinstance(metrics_dict, dict):
-                        for k, v in metrics_dict.items():
-                            flat_result[f"{metric_type}_{k}"] = v
-                    else:
-                        flat_result[metric_type] = metrics_dict
-        results_df = pd.DataFrame([flat_result])
-        if os.path.exists(results_full_log_path):
-            results_df.to_csv(results_full_log_path, mode='a', header=False, index=False)
-        else:
-            results_df.to_csv(results_full_log_path, mode='w', header=True, index=False)
-        logging.info(f"Full config results logged to {results_full_log_path}")
-        results_comp_log_path = os.path.join(results_dir, 'experiments_comparison_log.csv')
-        comp_row = {
-            'experiment_id': f"{experiment_id}_{run_name}",
-            'model_type': this_model_params.get('model_type', 'unknown'),
+        # Prepare log row (minimal example, expand as needed)
+        row = {
+            'experiment_id': experiment_id,
+            'random_seed': exp_config.get('random_seed', ''),
+            'model_type': run_cfg.get('model_type', ''),
             'run_status': run_status,
             'error_message': error_message,
             'elapsed_time_sec': elapsed_time,
-            'final_delta': flat_result.get('final_delta', None),
+            'final_epsilon': sim_result.get('final_epsilon') if sim_result else None,
+            'final_delta': sim_result.get('final_delta') if sim_result else None,
+            'mse': sim_result['metrics'].get('mse') if sim_result and 'metrics' in sim_result else None,
+            'r2': sim_result['metrics'].get('r2') if sim_result and 'metrics' in sim_result else None,
+            'sharpe': sim_result['metrics'].get('sharpe') if sim_result and 'metrics' in sim_result else None,
+            'max_drawdown': sim_result['metrics'].get('max_drawdown') if sim_result and 'metrics' in sim_result else None,
+            'var_95': sim_result['metrics'].get('var_95') if sim_result and 'metrics' in sim_result else None,
+            'var_99': sim_result['metrics'].get('var_99') if sim_result and 'metrics' in sim_result else None,
+            'cvar_95': sim_result['metrics'].get('cvar_95') if sim_result and 'metrics' in sim_result else None,
+            'metric_communication_total_MB_uploaded': sim_result.get('metric_communication_total_MB_uploaded') if sim_result else None,
+            'convergence_rounds': sim_result.get('convergence_rounds') if sim_result else None,
         }
-        metric_map = {
-            'Sharpe': None,
-            'Max Drawdown': None,
-            'VaR_95': None,
-            'CVaR_95': None
-        }
-        metric_key_map = {
-            'Sharpe': 'sharpe',
-            'Max Drawdown': 'max_drawdown',
-            'VaR_95': 'var_95',
-            'CVaR_95': 'cvar_95',
-        }
-        if sim_result is not None and 'metrics' in sim_result:
-            metrics_dict = sim_result['metrics']
-            for csv_key, metric_key in metric_key_map.items():
-                v = None
-                for k in metrics_dict:
-                    if k.lower() == metric_key:
-                        v = metrics_dict[k]
-                        break
-                if v is None:
-                    for mval in metrics_dict.values():
-                        if isinstance(mval, dict):
-                            for k2 in mval:
-                                if k2.lower() == metric_key:
-                                    v = mval[k2]
-                                    break
-                        if v is not None:
-                            break
-                metric_map[csv_key] = v
-        comp_row.update(metric_map)
-        # --- Write header if file does not exist or is empty ---
-        write_header = not os.path.exists(results_comp_log_path) or os.path.getsize(results_comp_log_path) == 0
-        comp_columns = [
-            'experiment_id', 'model_type', 'run_status', 'error_message', 'elapsed_time_sec',
-            'final_delta', 'Sharpe', 'Max Drawdown', 'VaR_95', 'CVaR_95'
-        ]
-        comp_row_ordered = {col: comp_row.get(col, None) for col in comp_columns}
-        comp_df = pd.DataFrame([comp_row_ordered])
-        comp_df = comp_df[comp_columns]  # Ensure column order
-        comp_df.to_csv(results_comp_log_path, mode='a', header=write_header, index=False)
-        logging.info(f"Comparison metrics logged to {results_comp_log_path}")
+        # Optionally, update with any additional metrics
+        if sim_result and 'metrics' in sim_result:
+            for k, v in sim_result['metrics'].items():
+                if k not in row:
+                    row[k] = v
+        # Append to master logs (thread/process safe)
+        append_to_master_log(row, master_comp_log)
+        # Append full config/results to master_full_log
+        append_to_master_log({**row, **exp_config}, master_full_log)
 
 
 # --- Command Line Interface ---
