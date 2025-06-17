@@ -27,7 +27,7 @@ TEST_SYMBOL_RATE_LIMIT = "RATE"
 TEST_SYMBOL_IO_ERROR = "IOERR"
 TEST_SYMBOL_RETRY = "RETRY"
 
-FAKE_CSV_DATA = "timestamp,open,high,low,close,volume\n2024-01-01,100,101,99,100.5,10000\n"
+FAKE_CSV_DATA = "timestamp,open,high,low,adjusted_close,volume\n2024-01-01,100,101,99,100.5,10000\n"
 RATE_LIMIT_NOTE_JSON = """
 {
     "Note": "We have detected your API key and our standard API rate limit is 25 requests per day."

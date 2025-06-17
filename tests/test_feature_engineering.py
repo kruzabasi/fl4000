@@ -13,7 +13,7 @@ from feature_engineering import add_moving_averages, add_lags, add_calendar_feat
 def sample_timeseries_df():
     """Provides a sample DataFrame for testing."""
     data = {
-        'close': [100, 101, 102, 103, 104, 200, 198, 196, 194, 192],
+        'adjusted_close': [100, 101, 102, 103, 104, 200, 198, 196, 194, 192],
         'log_return': np.log([np.nan, 101/100, 102/101, 103/102, 104/103, np.nan, 198/200, 196/198, 194/196, 192/194]),
         'symbol': ['A', 'A', 'A', 'A', 'A', 'B', 'B', 'B', 'B', 'B']
     }
@@ -26,7 +26,7 @@ def sample_timeseries_df():
 def test_add_moving_averages_calculates_correctly(sample_timeseries_df):
     """Test SMA calculation, handling groups and min_periods."""
     window = 3
-    result_df = add_moving_averages(sample_timeseries_df.copy(), windows=[window])
+    result_df = add_moving_averages(sample_timeseries_df.copy(), windows=[window], price_col='adjusted_close')
 
     # Manually calculate expected SMA for symbol 'A'
     expected_sma_A = [np.nan, np.nan, (100+101+102)/3, (101+102+103)/3, (102+103+104)/3]

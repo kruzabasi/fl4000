@@ -10,7 +10,9 @@ __pycache__/
 .pytest_cache/
 
 # IDE files
+.DS_Store
 .vscode/
+vs-code.edn
 .idea/
 .lsp/
 .clj-kondo/
@@ -19,14 +21,28 @@ __pycache__/
 # Data files (if large or sensitive - decide based on project policy)
 data/
 
+# Plots
+plots/
+scripts/
+
 # Output / Logs
 *.log
 results/
 output/
 logs/
+configs/sensitivity/*
+!configs/sensitivity/template_sensitivity.yaml
 
 # Secrets
 .env
 
 # Jupyter Notebook Checkpoints
 .ipynb_checkpoints/
+
+# Experiment scripts and diagnostics
+experimental/
+
+# documents
+methodology*
+
+quarantine/

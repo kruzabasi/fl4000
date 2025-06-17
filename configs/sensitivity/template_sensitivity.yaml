@@ -1,0 +1,63 @@
+experiment_id: "SENSITIVITY_SWEEP_<PARAM>_<VALUE>_seed<SEED>"
+random_seed: <SEED>
+risk_free_rate: 0.01
+non_iid_params:
+  alpha: <ALPHA>
+fl_params:
+  total_rounds: 100
+  clients_per_round: <CLIENTS_PER_ROUND>
+  local_epochs: 5
+  batch_size: 64
+  learning_rate: 0.1
+model_params:
+  alpha: 1.0
+  mu_prox: <MU_PROX>
+runs:
+  fedprox_dp_run:
+    model_type: "FedProxDP"
+    dp_params:
+      clip_norm: 0.5
+      target_delta: 1e-5
+      noise_multiplier: <NOISE_MULTIPLIER>
+features:
+  - adjusted_close
+  - close
+  - dividend_amount
+  - high
+  - low
+  - open
+  - split_coefficient
+  - volume
+  - log_return
+  - sma_5
+  - sma_20
+  - sma_60
+  - volatility_20
+  - day_of_week
+  - month
+  - quarter
+  - log_return_lag_1
+  - log_return_lag_2
+  - log_return_lag_3
+  - log_return_lag_5
+  - log_return_lag_10
+  - volume_lag_1
+  - volume_lag_2
+  - volume_lag_3
+  - volume_lag_5
+  - volume_lag_10
+  - adjusted_close_lag_1
+  - adjusted_close_lag_2
+  - adjusted_close_lag_3
+  - adjusted_close_lag_5
+  - adjusted_close_lag_10
+  - rsi
+  - macd
+  - macd_signal
+  - macd_diff
+  - obv
+target: log_return
+exclude_columns:
+  - symbol
+  - timestamp
+data_partition_path: <DATA_PARTITION_PATH>

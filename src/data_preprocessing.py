@@ -33,7 +33,7 @@ def load_raw_data(raw_dir: str = DATA_DIR, symbols: Optional[List[str]] = None) 
         all_files = [f for f in all_files if os.path.splitext(os.path.basename(f))[0] in symbols]
 
     dfs = []
-    required_cols = {'timestamp', 'open', 'high', 'low', 'close', 'volume'}
+    required_cols = {'timestamp', 'open', 'high', 'low', 'adjusted_close', 'volume'}
     for file in all_files:
         try:
             df = pd.read_csv(file)
@@ -55,7 +55,7 @@ def load_raw_data(raw_dir: str = DATA_DIR, symbols: Optional[List[str]] = None) 
 
     combined = pd.concat(dfs, ignore_index=True)
     # Ensure essential columns exist after standardization
-    expected_cols = ['symbol', 'open', 'high', 'low', 'close', 'volume']
+    expected_cols = ['symbol', 'open', 'high', 'low', 'adjusted_close', 'volume']
     missing_cols = [col for col in expected_cols if col not in combined.columns]
     if missing_cols:
         logging.warning(f"Combined DataFrame missing essential columns: {missing_cols}")
@@ -168,7 +168,7 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
 
     return df_final
 
-def calculate_log_returns(df: pd.DataFrame, price_col: str = 'close') -> pd.DataFrame:
+def calculate_log_returns(df: pd.DataFrame, price_col: str = 'adjusted_close') -> pd.DataFrame:
     """
     Calculates the logarithmic returns for the specified price column,
     grouped by symbol. Drops rows where return cannot be calculated (first row per symbol).
@@ -183,13 +183,16 @@ def calculate_log_returns(df: pd.DataFrame, price_col: str = 'close') -> pd.Data
         raise ValueError(f"Price column '{price_col}' not found in DataFrame.")
     if 'symbol' not in df.columns:
         logging.error("Missing 'symbol' column for grouping. Calculating returns globally.")
-        df['log_return'] = np.log(df[price_col] / df[price_col].shift(1))
+        price = df[price_col]
+        price_shifted = price.shift(1)
+        mask = (price > 0) & (price_shifted > 0)
+        df['log_return'] = np.where(mask, np.log(price / price_shifted), np.nan)
     else:
         if 'timestamp' not in df.columns and isinstance(df.index, pd.DatetimeIndex):
             df = df.reset_index().rename(columns={'index': 'timestamp'})
         df = df.sort_values(by=['symbol', 'timestamp'])
         df['log_return'] = df.groupby('symbol')[price_col].transform(
-            lambda x: np.log(x / x.shift(1))
+            lambda x: np.where((x > 0) & (x.shift(1) > 0), np.log(x / x.shift(1)), np.nan)
         )
     initial_rows = df.shape[0]
     df = df.dropna(subset=['log_return']) # Drop rows with NaN returns

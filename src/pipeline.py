@@ -23,7 +23,7 @@ OUTPUT_FILENAME = 'ftse_processed_features.parquet'
 SMA_WINDOWS = [5, 20, 60]
 VOL_WINDOWS = [20]
 RSI_WINDOW = 14
-LAG_COLS = ['log_return', 'volume', 'close'] # Add more features to lag as needed
+LAG_COLS = ['log_return', 'volume', 'adjusted_close'] # Add more features to lag as needed
 LAG_PERIODS = [1, 2, 3, 5, 10] # Example lag periods
 
 # --- Pipeline Functions ---
@@ -51,7 +51,7 @@ def run_data_pipeline(symbols: List[str], raw_dir: str, processed_dir: str, outp
         df_cleaned = clean_data(df_raw)
 
         # 4. Calculate Returns
-        df_returns = calculate_log_returns(df_cleaned, price_col='close')
+        df_returns = calculate_log_returns(df_cleaned, price_col='adjusted_close')
 
         # 5. Initial Anomaly Check (Volume)
         check_anomalies(df_returns, return_col=None, volume_col='volume') # Check volume only first
@@ -75,7 +75,7 @@ def run_data_pipeline(symbols: List[str], raw_dir: str, processed_dir: str, outp
 
         # 6. Feature Engineering
         logging.info("--- Starting Feature Engineering ---")
-        df_features = add_moving_averages(df_returns, windows=SMA_WINDOWS)
+        df_features = add_moving_averages(df_returns, windows=SMA_WINDOWS, price_col='adjusted_close')
         df_features = add_volatility(df_features, windows=VOL_WINDOWS)
         df_features = add_calendar_features(df_features)
         df_features = add_lags(df_features, lag_cols=LAG_COLS, lags=LAG_PERIODS)

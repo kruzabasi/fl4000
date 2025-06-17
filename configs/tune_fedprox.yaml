@@ -1,0 +1,18 @@
+experiment_base_id: "TuneFedProxDP"
+random_seed: 123
+model_type: "FedProxDP"
+# Fixed FL/DP/model parameters for tuning
+fl_params:
+  total_rounds: 5
+  clients_per_round: 10
+  local_epochs: 5
+  batch_size: 64
+model_params:
+  alpha: 1.0
+# Ranges for grid search
+parameter_ranges:
+  mu_prox: [0.001, 0.01, 0.1, 1.0]
+  learning_rate: [0.1, 0.01, 0.001]
+  clip_norm: [0.5, 1.0, 5.0]
+validation_metric: 'predictive_mse'
+validation_set_path: 'data/processed/central_validation_set.parquet'
